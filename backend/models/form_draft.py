@@ -12,7 +12,6 @@ class FormFieldValue(BaseModel):
 
 class FormDraftCreate(BaseModel):
     appointment_id: UUID
-    patient_id: UUID
     soap_note_id: UUID
     form_type: FormType = FormType.T2201
 

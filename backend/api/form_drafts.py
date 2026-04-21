@@ -65,6 +65,16 @@ async def generate_form_draft(patient_id: UUID, request: FormDraftCreate):
         raise HTTPException(status_code=404, detail="Patient not found")
     patient = patient_resp.data
 
+    appointment_resp = (
+        client.table("appointments")
+        .select("*")
+        .eq("id", str(request.appointment_id))
+        .single()
+        .execute()
+    )
+    if not appointment_resp.data or str(appointment_resp.data.get("patient_id")) != str(patient_id):
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
     # 2. Fetch the approved SOAP note
     soap_resp = (
         client.table("soap_notes")
@@ -77,6 +87,9 @@ async def generate_form_draft(patient_id: UUID, request: FormDraftCreate):
     if not soap_resp.data:
         raise HTTPException(status_code=409, detail="SOAP note not found or not approved")
     soap_note = soap_resp.data
+
+    if str(soap_note.get("patient_id")) != str(patient_id) or str(soap_note.get("appointment_id")) != str(request.appointment_id):
+        raise HTTPException(status_code=409, detail="SOAP note does not match the requested patient appointment")
 
     # 3. Fetch full FHIR history for the patient
     try:
@@ -287,13 +300,14 @@ async def approve_and_sync_form(form_id: UUID, user: dict = Depends(auth_depende
 
     # 2. Write FHIR Composition
     try:
+        fhir_patient_id = patient["fhir_id"]
         composition_data = {
             "resourceType": "Composition",
             "status": "final",
             "type": {
                 "coding": [{"system": "http://loinc.org", "code": "11488-4", "display": "Consult note"}]
             },
-            "subject": {"reference": f"Patient/{draft['patient_id']}"},
+            "subject": {"reference": f"Patient/{fhir_patient_id}"},
             "date": datetime.now(timezone.utc).isoformat(),
             "title": "T2201 Disability Tax Credit Certificate",
             "section": [
@@ -315,7 +329,7 @@ async def approve_and_sync_form(form_id: UUID, user: dict = Depends(auth_depende
             "type": {
                 "coding": [{"system": "http://loinc.org", "code": "11488-4"}]
             },
-            "subject": {"reference": f"Patient/{draft['patient_id']}"},
+            "subject": {"reference": f"Patient/{fhir_patient_id}"},
             "content": [
                 {
                     "attachment": {
