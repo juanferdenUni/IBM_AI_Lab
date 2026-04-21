@@ -15,7 +15,7 @@ async def log_action(
     metadata: dict[str, Any] | None = None,
 ) -> None:
     try:
-        client = await get_client()
+        client = get_client()
         await client.table("audit_log").insert({
             "actor_id": str(actor_id),
             "event": action.value,

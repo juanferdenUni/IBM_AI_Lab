@@ -18,7 +18,7 @@ async def update_soap_note(
     body: SOAPNoteUpdate,
     user: dict = Depends(auth_dependency),
 ):
-    db = await get_client()
+    db = get_client()
 
     existing = await db.table("soap_notes").select("*").eq("id", soap_note_id).is_("superseded_by", "null").single().execute()
     if not existing.data:
@@ -53,7 +53,7 @@ async def approve_soap_note(
     soap_note_id: str,
     user: dict = Depends(auth_dependency),
 ):
-    db = await get_client()
+    db = get_client()
 
     existing = await db.table("soap_notes").select("*").eq("id", soap_note_id).single().execute()
     if not existing.data:

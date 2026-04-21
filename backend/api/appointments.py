@@ -117,7 +117,7 @@ async def start_appointment(
     if appointment_id in _sessions:
         raise HTTPException(status_code=409, detail="Transcription already in progress for this appointment")
 
-    db = await get_client()
+    db = get_client()
 
     patient = await db.table("patients").select("id").eq("id", patient_id).single().execute()
     if not patient.data:
@@ -188,7 +188,7 @@ async def end_appointment(
     if not session:
         raise HTTPException(status_code=404, detail="No active appointment found")
 
-    db = await get_client()
+    db = get_client()
 
     existing = await db.table("soap_notes").select("id").eq("appointment_id", appointment_id).is_("superseded_by", "null").execute()
     if existing.data:
@@ -227,7 +227,7 @@ async def get_soap_note(
     patient_id: str,
     user: dict = Depends(auth_dependency),
 ):
-    db = await get_client()
+    db = get_client()
     result = await db.table("soap_notes").select("*").eq("patient_id", patient_id).is_("superseded_by", "null").execute()
 
     if not result.data:
