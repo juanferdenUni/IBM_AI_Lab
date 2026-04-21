@@ -1,0 +1,1 @@
+{"resourceType": "Bundle", "type": "searchset", "total": 2, "entry": [{"resource": {"resourceType": "MedicationRequest", "id": "med-001", "status": "active", "medicationCodeableConcept": {"text": "Metformin 1000mg BID"}}}, {"resource": {"resourceType": "MedicationRequest", "id": "med-002", "status": "active", "medicationCodeableConcept": {"text": "Ramipril 5mg OD"}}}]}

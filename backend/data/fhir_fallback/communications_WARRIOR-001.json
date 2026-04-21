@@ -1,0 +1,1 @@
+{"resourceType": "Bundle", "type": "searchset", "total": 1, "entry": [{"resource": {"resourceType": "Communication", "id": "comm-001", "status": "completed", "sent": "2026-04-01", "payload": [{"contentString": "Cardiology referral response: Echo normal, no intervention needed"}]}}]}

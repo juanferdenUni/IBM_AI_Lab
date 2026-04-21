@@ -1,0 +1,1 @@
+{"resourceType": "Bundle", "type": "searchset", "total": 1, "entry": [{"resource": {"resourceType": "Patient", "id": "warrior-patient-001", "identifier": [{"system": "MRN", "value": "WARRIOR-001"}], "name": [{"family": "M", "given": ["Sarah"]}], "birthDate": "1978-07-22"}}]}
