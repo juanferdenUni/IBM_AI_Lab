@@ -17,11 +17,21 @@ class Correspondence(BaseModel):
     summary: str
 
 
+class InboxItem(BaseModel):
+    channel: str
+    title: str
+    date: str
+    summary: str
+    priority: str = "routine"
+    requires_action: bool = False
+
+
 class BriefContent(BaseModel):
     chronic_conditions: list[str]
     recent_labs: list[LabResult]
     active_medications: list[str]
     recent_correspondence: list[Correspondence]
+    inbox_items: list[InboxItem] = []
     missing_data_flags: list[str]
 
 

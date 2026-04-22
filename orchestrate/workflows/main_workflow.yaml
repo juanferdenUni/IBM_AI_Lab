@@ -1,3 +1,76 @@
-# Spec: CONTRACTS.md §6 main_workflow.yaml
-# Owner: Juan
-# Configure via IBM Orchestrate UI — see orchestrate/README.md
+# IBM Orchestrate workflow skeleton for the Warriors care-copilot demo.
+# The MVP backend entrypoint is:
+#   POST /api/orchestrate/advance-phase
+#
+# This file is intentionally lightweight because the exact import format can vary
+# across Orchestrate environments. It captures the agreed phase machine and the
+# payloads the team should configure in the Orchestrate UI.
+
+workflow:
+  name: warriors-appointment-lifecycle
+  description: >
+    Three-phase physician copilot workflow. The pre-appointment phase generates
+    an IBM watsonx-powered patient context brief before the visit, then pauses
+    for physician review.
+
+  shared_headers:
+    X-Orchestrate-Secret: ${ORCHESTRATE_SHARED_SECRET}
+
+  phases:
+    - name: pre_appointment
+      trigger: patient_selected_in_dashboard
+      action:
+        method: POST
+        path: /api/orchestrate/advance-phase
+        body:
+          patient_id: ${patient_id}
+          appointment_id: ${appointment_id}
+          target_phase: pre_appointment
+          triggered_by: physician
+      success:
+        next_action_url: /api/patients/${patient_id}/context-brief?appointment_id=${appointment_id}
+        wait_for: physician_context_brief_review
+      notes:
+        - Backend pulls FHIR context and uses IBM Granite on watsonx to generate the brief.
+        - Missing data stays visible as explicit flags in the stored brief JSON.
+        - Physician approval is required before the workflow may move to during_appointment.
+
+    - name: during_appointment
+      trigger: physician_clicks_start_appointment
+      guard:
+        requires: approved_context_brief
+      action:
+        method: POST
+        path: /api/orchestrate/advance-phase
+        body:
+          patient_id: ${patient_id}
+          appointment_id: ${appointment_id}
+          target_phase: during_appointment
+          triggered_by: physician
+          audio_file_path: ${audio_file_path}
+
+    - name: post_appointment
+      trigger: physician_approves_soap_note
+      guard:
+        requires: approved_soap_note
+      action:
+        method: POST
+        path: /api/orchestrate/advance-phase
+        body:
+          patient_id: ${patient_id}
+          appointment_id: ${appointment_id}
+          target_phase: post_appointment
+          triggered_by: physician
+
+    - name: completed
+      trigger: physician_approves_form
+      guard:
+        requires: form_draft_exists
+      action:
+        method: POST
+        path: /api/orchestrate/advance-phase
+        body:
+          patient_id: ${patient_id}
+          appointment_id: ${appointment_id}
+          target_phase: completed
+          triggered_by: physician
