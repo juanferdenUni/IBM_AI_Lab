@@ -122,15 +122,15 @@ async def start_appointment(
 
     db = get_client()
 
-    patient = await db.table("patients").select("id").eq("id", patient_id).single().execute()
+    patient = db.table("patients").select("id").eq("id", patient_id).execute()
     if not patient.data:
         raise HTTPException(status_code=404, detail=f"Patient {patient_id} not found")
 
-    appt = await db.table("appointments").select("id").eq("id", appointment_id).eq("patient_id", patient_id).single().execute()
+    appt = db.table("appointments").select("id").eq("id", appointment_id).eq("patient_id", patient_id).execute()
     if not appt.data:
         raise HTTPException(status_code=404, detail=f"Appointment {appointment_id} not found")
 
-    await db.table("appointments").update({"audio_file_path": audio_file_path}).eq("id", appointment_id).execute()
+    db.table("appointments").update({"audio_file_path": audio_file_path}).eq("id", appointment_id).execute()
 
     session = _Session(appointment_id=appointment_id, patient_id=patient_id, actor_id=user["id"])
     _sessions[appointment_id] = session
@@ -193,7 +193,7 @@ async def end_appointment(
 
     db = get_client()
 
-    existing = await db.table("soap_notes").select("id").eq("appointment_id", appointment_id).is_("superseded_by", "null").execute()
+    existing = db.table("soap_notes").select("id").eq("appointment_id", appointment_id).is_("superseded_by", "null").execute()
     if existing.data:
         raise HTTPException(status_code=409, detail="SOAP note already finalised for this appointment")
 
@@ -201,7 +201,7 @@ async def end_appointment(
     soap = session.current_soap
     billing_codes = [c.model_dump() for c in session.billing_codes]
 
-    result = await db.table("soap_notes").insert({
+    result = db.table("soap_notes").insert({
         "appointment_id": appointment_id,
         "patient_id": patient_id,
         "transcript_text": full_transcript,
@@ -231,7 +231,15 @@ async def get_soap_note(
     user: dict = Depends(auth_dependency),
 ):
     db = get_client()
-    result = await db.table("soap_notes").select("*").eq("patient_id", patient_id).is_("superseded_by", "null").execute()
+    result = (
+        db.table("soap_notes")
+        .select("*")
+        .eq("patient_id", patient_id)
+        .is_("superseded_by", "null")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
 
     if not result.data:
         raise HTTPException(status_code=404, detail=f"No SOAP note found for patient {patient_id}")

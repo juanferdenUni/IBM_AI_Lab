@@ -20,7 +20,7 @@ async def update_soap_note(
 ):
     db = get_client()
 
-    existing = await db.table("soap_notes").select("*").eq("id", soap_note_id).is_("superseded_by", "null").single().execute()
+    existing = db.table("soap_notes").select("*").eq("id", soap_note_id).is_("superseded_by", "null").single().execute()
     if not existing.data:
         raise HTTPException(status_code=404, detail="SOAP note not found")
 
@@ -44,7 +44,7 @@ async def update_soap_note(
     if body.billing_codes is not None:
         updates["billing_codes"] = [c.model_dump() for c in body.billing_codes]
 
-    result = await db.table("soap_notes").update(updates).eq("id", soap_note_id).execute()
+    result = db.table("soap_notes").update(updates).eq("id", soap_note_id).execute()
     return result.data[0]
 
 
@@ -55,7 +55,7 @@ async def approve_soap_note(
 ):
     db = get_client()
 
-    existing = await db.table("soap_notes").select("*").eq("id", soap_note_id).single().execute()
+    existing = db.table("soap_notes").select("*").eq("id", soap_note_id).single().execute()
     if not existing.data:
         raise HTTPException(status_code=404, detail="SOAP note not found")
 
@@ -63,7 +63,7 @@ async def approve_soap_note(
         raise HTTPException(status_code=409, detail="Already approved")
 
     approved_at = datetime.now(timezone.utc).isoformat()
-    result = await db.table("soap_notes").update({
+    result = db.table("soap_notes").update({
         "approved": True,
         "approved_at": approved_at,
     }).eq("id", soap_note_id).execute()

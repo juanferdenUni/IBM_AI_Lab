@@ -2,25 +2,23 @@ import re
 import json
 from typing import TypeVar, Type
 from pydantic import BaseModel
-from ibm_watsonx_ai import APIClient, Credentials
-from ibm_watsonx_ai.foundation_models import ModelInference
+from ibm_watsonx_ai.foundation_models import Model
 from ibm_watsonx_ai.metanames import GenTextParamsMetaNames as GenParams
 from backend.config import settings
 
 T = TypeVar("T", bound=BaseModel)
 
-_model: ModelInference | None = None
+_model: Model | None = None
 
 
-def _get_model() -> ModelInference:
-    credentials = Credentials(
-        url=settings.watsonx_url,
-        api_key=settings.watsonx_api_key,
-    )
-    client = APIClient(credentials)
-    return ModelInference(
+def _get_model() -> Model:
+    credentials = {
+        "url": settings.watsonx_url,
+        "apikey": settings.watsonx_api_key,
+    }
+    return Model(
         model_id=settings.granite_model_id,
-        api_client=client,
+        credentials=credentials,
         project_id=settings.watsonx_project_id,
         params={
             GenParams.MAX_NEW_TOKENS: 1024,
@@ -49,18 +47,20 @@ async def generate(
 
     messages = []
     if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+        prompt = f"{system}\n\n{prompt}"
 
     try:
-        response = _model.chat(
-            messages=messages,
+        response = _model.generate_text(
+            prompt=prompt,
             params={GenParams.MAX_NEW_TOKENS: max_tokens},
         )
     except Exception as e:
         raise LLMError(f"watsonx call failed: {e}") from e
 
-    raw: str = response["choices"][0]["message"]["content"].strip()
+    if isinstance(response, str):
+        raw = response.strip()
+    else:
+        raw = response["results"][0]["generated_text"].strip()
 
     if response_model is None:
         return raw

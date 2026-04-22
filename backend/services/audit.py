@@ -16,7 +16,7 @@ async def log_action(
 ) -> None:
     try:
         client = get_client()
-        await client.table("audit_log").insert({
+        client.table("audit_log").insert({
             "actor_id": str(actor_id),
             "event": action.value,
             "resource_type": resource_type,
