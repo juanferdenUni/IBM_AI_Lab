@@ -616,15 +616,9 @@ export default function Curas() {
         display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: 8,
-            background: "rgba(255,255,255,0.15)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 18,
-          }}>🏥</div>
+        
           <div>
             <div style={{ fontWeight: 700, color: "#fff", fontSize: 15 }}>Curas AI</div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)" }}>Autonomous Clinical Assistant</div>
           </div>
         </div>
         <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
