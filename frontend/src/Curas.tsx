@@ -166,7 +166,7 @@ function PreAppointment({ onNext }) {
 
   return (
     <div style={{ padding: 24, fontFamily: "'DM Sans', sans-serif", maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+      <div className="grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
 
         {/* Morning Dashboard */}
         <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
@@ -327,7 +327,7 @@ function DuringAppointment({ onNext }) {
 
   return (
     <div style={{ padding: 24, fontFamily: "'DM Sans', sans-serif", maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 20 }}>
+      <div className="grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 20 }}>
 
         {/* Live Scribe Interface */}
         <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
@@ -468,7 +468,7 @@ function PostAppointment() {
 
   return (
     <div style={{ padding: 24, fontFamily: "'DM Sans', sans-serif", maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 20 }}>
+      <div className="grid-2col" style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 20 }}>
 
         {/* Form Panel */}
         <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
@@ -597,7 +597,12 @@ function PostAppointment() {
       <style>{`
         @keyframes loadBar { from { width: 0%; } to { width: 100%; } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-      `}</style>
+        @media (max-width: 768px) {
+    .grid-2col { grid-template-columns: 1fr !important; }
+    .patient-bar { flex-direction: column !important; align-items: flex-start !important; }
+    .patient-bar-right { text-align: left !important; }
+  }
+`}</style>
     </div>
   );
 }
