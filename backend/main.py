@@ -2,9 +2,9 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from backend.api.test import router as test_router
-from backend.config import settings
-from backend.api import (
+from api.test import router as test_router
+from config import settings
+from api import (
     patients,
     context_briefs,
     appointments,

@@ -18,7 +18,7 @@ async def list_patients(user: dict = Depends(auth_dependency)):
 
         query = client.table("patients").select("*")
 
-        if settings.AUTH_ENABLED:
+        if settings.auth_enabled:
             query = query.eq("physician_id", user["id"])
 
         response = (
@@ -45,7 +45,7 @@ async def get_patient(patient_id: UUID, user: dict = Depends(auth_dependency)):
 
         query = client.table("patients").select("*").eq("id", patient_id_str)
 
-        if settings.AUTH_ENABLED:
+        if settings.auth_enabled:
             query = query.eq("physician_id", user["id"])
 
         response = query.execute()
@@ -75,7 +75,7 @@ async def update_patient_workflow_state(
         # Build base query
         check_query = client.table("patients").select("*").eq("id", patient_id_str)
 
-        if settings.AUTH_ENABLED:
+        if settings.auth_enabled:
             check_query = check_query.eq("physician_id", user["id"])
 
         check = check_query.execute()
@@ -94,7 +94,7 @@ async def update_patient_workflow_state(
 
         update_query = client.table("patients").update(update_data).eq("id", patient_id_str)
 
-        if settings.AUTH_ENABLED:
+        if settings.auth_enabled:
             update_query = update_query.eq("physician_id", user["id"])
 
         response = update_query.execute()

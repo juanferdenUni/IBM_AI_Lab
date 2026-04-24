@@ -25,8 +25,7 @@ class Settings(BaseSettings):
     orchestrate_shared_secret: Optional[str] = None
 
     # Feature flags
-    auth_enabled: bool = True
-    AUTH_ENABLED: bool = False
+    auth_enabled: bool = False
     confidence_threshold: float = 0.75
 
     # Deployment
@@ -37,7 +36,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     model_config = SettingsConfigDict(
-        env_file="backend/.env",
+        env_file=".env",
         case_sensitive=False,
         extra="allow",
     )
