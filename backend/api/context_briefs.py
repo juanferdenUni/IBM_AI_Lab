@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from config import settings
 from middleware.auth import auth_dependency
 from models.context_brief import ContextBrief
 from models.enums import AuditAction, WorkflowState
@@ -17,30 +18,26 @@ router = APIRouter()
 
 
 def _get_patient_for_user(client, patient_id: UUID, user_id: str) -> dict:
-    response = (
-        client.table("patients")
-        .select("*")
-        .eq("id", str(patient_id))
-        .eq("physician_id", user_id)
-        .single()
-        .execute()
-    )
-    if not response.data:
+    query = client.table("patients").select("*").eq("id", str(patient_id))
+    if settings.auth_enabled:
+        query = query.eq("physician_id", user_id)
+    response = query.maybe_single().execute()
+    if not response or not response.data:
         raise HTTPException(status_code=404, detail="Patient not found")
     return response.data
 
 
 def _get_appointment_for_user(client, appointment_id: str, patient_id: UUID, user_id: str) -> dict:
-    response = (
+    query = (
         client.table("appointments")
         .select("*")
         .eq("id", appointment_id)
         .eq("patient_id", str(patient_id))
-        .eq("physician_id", user_id)
-        .single()
-        .execute()
     )
-    if not response.data:
+    if settings.auth_enabled:
+        query = query.eq("physician_id", user_id)
+    response = query.maybe_single().execute()
+    if not response or not response.data:
         raise HTTPException(status_code=404, detail="Appointment not found")
     return response.data
 
@@ -129,11 +126,12 @@ async def generate_context_brief(patient_id: UUID, body: dict, user: dict = Depe
     patient = _get_patient_for_user(client, patient_id, user["id"])
     _get_appointment_for_user(client, appointment_id, patient_id, user["id"])
 
+    actor_id = user["id"] if settings.auth_enabled else patient["physician_id"]
     return await create_context_brief_record(
         client=client,
         patient=patient,
         appointment_id=appointment_id,
-        actor_id=user["id"],
+        actor_id=actor_id,
     )
 
 
@@ -184,10 +182,10 @@ async def approve_context_brief(brief_id: UUID, user: dict = Depends(auth_depend
         client.table("context_briefs")
         .select("*")
         .eq("id", str(brief_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not response.data:
+    if not response or not response.data:
         raise HTTPException(status_code=404, detail="Context brief not found")
 
     brief = response.data

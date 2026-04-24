@@ -35,7 +35,10 @@ async def generate(
 ) -> T | str:
     global _model
     if _model is None:
-        _model = _get_model()
+        try:
+            _model = _get_model()
+        except Exception as e:
+            raise LLMError(f"Failed to initialise watsonx model: {e}") from e
 
     if response_model is not None:
         schema = json.dumps(response_model.model_json_schema(), indent=2)

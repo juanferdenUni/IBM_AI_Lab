@@ -20,8 +20,8 @@ async def update_soap_note(
 ):
     db = get_client()
 
-    existing = db.table("soap_notes").select("*").eq("id", soap_note_id).is_("superseded_by", "null").single().execute()
-    if not existing.data:
+    existing = db.table("soap_notes").select("*").eq("id", soap_note_id).is_("superseded_by", "null").maybe_single().execute()
+    if not existing or not existing.data:
         raise HTTPException(status_code=404, detail="SOAP note not found")
 
     if existing.data["approved"]:
@@ -55,8 +55,8 @@ async def approve_soap_note(
 ):
     db = get_client()
 
-    existing = db.table("soap_notes").select("*").eq("id", soap_note_id).single().execute()
-    if not existing.data:
+    existing = db.table("soap_notes").select("*").eq("id", soap_note_id).maybe_single().execute()
+    if not existing or not existing.data:
         raise HTTPException(status_code=404, detail="SOAP note not found")
 
     if existing.data["approved"]:

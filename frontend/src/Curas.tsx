@@ -472,7 +472,7 @@ function PreAppointment({ patient, appointmentId, onNext }: {
               {emrDocs.map((doc, index) => {
                 const loaded = DEMO_MODE ? started && loadStep > index : doc.loaded;
                 return (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: loaded ? GREEN_LIGHT : GRAY_BG, borderRadius: 8, transition: "background 0.4s" }}>
+                  <div key={index} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: loaded ? GREEN_LIGHT : GRAY_BG, borderRadius: 8, transition: "background 0.4s" }}>
                     <div style={{ width: 20, height: 20, borderRadius: "50%", background: loaded ? GREEN : "#d1d5db", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#fff", flexShrink: 0, transition: "background 0.4s" }}>
                       {loaded ? "✓" : "…"}
                     </div>
@@ -520,49 +520,112 @@ function DuringAppointment({ patient, appointmentId, onNext }: {
   onNext: (soapNoteId?: string) => void;
 }) {
   const [recording, setRecording] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [soapStep, setSoapStep] = useState(0);
   const [pulse, setPulse] = useState(false);
-  // FIX: SOAP lines are editable state, not read-only
-  const [soapLines, setSoapLines] = useState<SoapLine[]>(DEMO_SOAP_LINES.map(l => ({ ...l })));
+  const [scribeError, setScribeError] = useState<string | null>(null);
+  const [soapLines, setSoapLines] = useState<SoapLine[]>(
+    DEMO_MODE
+      ? DEMO_SOAP_LINES.map(l => ({ ...l }))
+      : [
+          { label: "S", color: BLUE,  bg: BLUE_LIGHT,  text: "" },
+          { label: "O", color: TEAL,  bg: TEAL_LIGHT,  text: "" },
+          { label: "A", color: AMBER, bg: AMBER_LIGHT, text: "" },
+          { label: "P", color: GREEN, bg: GREEN_LIGHT, text: "" },
+        ]
+  );
   const [soapNoteId, setSoapNoteId] = useState<string | null>(null);
+  const [streamDone, setStreamDone] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const esRef = useRef<EventSource | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const appointmentIdRef = useRef(appointmentId);
+  appointmentIdRef.current = appointmentId;
+
+  const openSSEStream = () => {
+    const apptId = appointmentIdRef.current;
+    if (!patient.id || !apptId) return;
+    const token = localStorage.getItem("supabase_token") ?? "";
+    const es = new EventSource(`${import.meta.env.VITE_API_BASE_URL}/api/patients/${patient.id}/appointment/stream?appointment_id=${apptId}&token=${token}`);
+    esRef.current = es;
+    es.addEventListener("soap_update", (e: MessageEvent) => {
+      const soap = JSON.parse(e.data);
+      setSoapLines([
+        { label: "S", color: BLUE,  bg: BLUE_LIGHT,  text: soap.subjective },
+        { label: "O", color: TEAL,  bg: TEAL_LIGHT,  text: soap.objective  },
+        { label: "A", color: AMBER, bg: AMBER_LIGHT, text: soap.assessment },
+        { label: "P", color: GREEN, bg: GREEN_LIGHT, text: soap.plan       },
+      ]);
+      setSoapStep(s => Math.min(s + 1, 4));
+    });
+    es.addEventListener("done", () => {
+      es.close(); setSoapStep(4); setStreamDone(true); setProcessing(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (patient.id && apptId)
+        api.endAppointment(patient.id, apptId).then(note => {
+          setSoapNoteId(note.id);
+          const s = note.soap_json;
+          if (s) setSoapLines([
+            { label: "S", color: BLUE,  bg: BLUE_LIGHT,  text: s.subjective ?? "" },
+            { label: "O", color: TEAL,  bg: TEAL_LIGHT,  text: s.objective  ?? "" },
+            { label: "A", color: AMBER, bg: AMBER_LIGHT, text: s.assessment ?? "" },
+            { label: "P", color: GREEN, bg: GREEN_LIGHT, text: s.plan       ?? "" },
+          ]);
+        }).catch(console.error);
+    });
+    es.onerror = () => { console.warn("SSE error"); es.close(); };
+  };
+
+  const handleStartRecording = async () => {
+    if (DEMO_MODE) {
+      setRecording(true);
+      timerRef.current = setInterval(() => { setElapsed(e => e + 1); setPulse(p => !p); }, 1000);
+      [1500, 3000, 5000, 7000].forEach((d, i) => setTimeout(() => { setSoapStep(i + 1); if (i === 3) setStreamDone(true); }, d));
+      return;
+    }
+    setScribeError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setRecording(true);
+      timerRef.current = setInterval(() => { setElapsed(e => e + 1); setPulse(p => !p); }, 1000);
+    } catch (err) {
+      setScribeError("Microphone access denied. Check browser permissions.");
+    }
+  };
+
+  const handleStopRecording = () => {
+    if (DEMO_MODE) { setRecording(false); if (timerRef.current) clearInterval(timerRef.current); return; }
+    const mr = mediaRecorderRef.current;
+    if (!mr) return;
+    mr.onstop = async () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setRecording(false);
+      setProcessing(true);
+      try {
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const { audio_file_path } = await api.uploadAudio(patient.id, appointmentId!, blob);
+        await api.startAppointmentScribe(patient.id, appointmentId!, audio_file_path);
+        openSSEStream();
+      } catch (err) {
+        console.error("Scribe start failed:", err);
+        setScribeError("Failed to start transcription. Check backend logs.");
+        setProcessing(false);
+      }
+    };
+    mr.stop();
+    mr.stream.getTracks().forEach(t => t.stop());
+  };
 
   useEffect(() => {
-    if (recording) {
-      timerRef.current = setInterval(() => { setElapsed(e => e + 1); setPulse(p => !p); }, 1000);
-      if (DEMO_MODE) {
-        [1500, 3000, 5000, 7000].forEach((d, i) => setTimeout(() => setSoapStep(i + 1), d));
-      } else {
-        if (!patient.id) return;
-        const token = localStorage.getItem("supabase_token") ?? "";
-        const es = new EventSource(`${import.meta.env.VITE_API_BASE_URL}/api/patients/${patient.id}/appointment/stream?token=${token}`);
-        esRef.current = es;
-        es.addEventListener("soap_update", (e: MessageEvent) => {
-          const soap = JSON.parse(e.data);
-          setSoapLines([
-            { label: "S", color: BLUE,  bg: BLUE_LIGHT,  text: soap.subjective },
-            { label: "O", color: TEAL,  bg: TEAL_LIGHT,  text: soap.objective  },
-            { label: "A", color: AMBER, bg: AMBER_LIGHT, text: soap.assessment },
-            { label: "P", color: GREEN, bg: GREEN_LIGHT, text: soap.plan       },
-          ]);
-          setSoapStep(s => Math.min(s + 1, 4));
-        });
-        es.addEventListener("done", () => {
-          es.close(); setSoapStep(4);
-          if (timerRef.current) clearInterval(timerRef.current);
-          if (patient.id && appointmentId)
-            api.endAppointment(patient.id, appointmentId).then(note => setSoapNoteId(note.id)).catch(console.error);
-        });
-        es.onerror = () => { console.warn("SSE error"); es.close(); };
-      }
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-      esRef.current?.close();
-    }
     return () => { if (timerRef.current) clearInterval(timerRef.current); esRef.current?.close(); };
-  }, [recording, patient.id, appointmentId]);
+  }, []);
 
   const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
@@ -589,14 +652,21 @@ function DuringAppointment({ patient, appointmentId, onNext }: {
           </div>
           <div style={{ padding: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
             <div style={{ position: "relative" }}>
-              <div style={{ width: 70, height: 70, borderRadius: "50%", background: recording ? (pulse ? "#fee2e2" : RED_LIGHT) : GRAY_BG, border: `2px solid ${recording ? RED : "#d1d5db"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, transition: "all 0.3s", cursor: "pointer" }} onClick={() => setRecording(r => !r)}>🎙️</div>
+              <div style={{ width: 70, height: 70, borderRadius: "50%", background: recording ? (pulse ? "#fee2e2" : RED_LIGHT) : processing ? TEAL_LIGHT : GRAY_BG, border: `2px solid ${recording ? RED : processing ? TEAL : "#d1d5db"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, transition: "all 0.3s" }}>
+                {processing ? "⏳" : "🎙️"}
+              </div>
               {recording && <div style={{ position: "absolute", bottom: -6, right: -6, background: RED, color: "#fff", fontSize: 9, fontWeight: 800, padding: "2px 5px", borderRadius: 4, letterSpacing: "0.1em" }}>REC</div>}
             </div>
-            <div style={{ fontSize: 13, color: recording ? RED : GRAY_MID, fontWeight: 600 }}>
-              {streamDone ? "✓ Data loaded" : recording ? `Recording — ${formatElapsed(elapsed)}` : "Tap to start recording"}
+            <div style={{ fontSize: 13, color: recording ? RED : processing ? TEAL : GRAY_MID, fontWeight: 600 }}>
+              {streamDone ? "✓ Transcription complete" : processing ? "Transcribing with Whisper..." : recording ? `Recording — ${fmt(elapsed)}` : "Tap to start recording"}
             </div>
-            <button onClick={() => setRecording(r => !r)} style={{ padding: "8px 24px", background: recording ? RED_LIGHT : TEAL, color: recording ? RED : "#fff", border: `1px solid ${recording ? RED : TEAL}`, borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
-              {recording ? "⏹ Stop Scribe" : "▶ Start Scribe"}
+            {scribeError && <div style={{ fontSize: 12, color: RED, background: RED_LIGHT, padding: "6px 12px", borderRadius: 6, width: "100%", textAlign: "center" }}>⚠ {scribeError}</div>}
+            <button
+              onClick={recording ? handleStopRecording : handleStartRecording}
+              disabled={processing}
+              style={{ padding: "8px 24px", background: recording ? RED_LIGHT : processing ? GRAY_BG : TEAL, color: recording ? RED : processing ? GRAY_MID : "#fff", border: `1px solid ${recording ? RED : processing ? "#d1d5db" : TEAL}`, borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: processing ? "not-allowed" : "pointer", fontFamily: "'DM Sans', sans-serif" }}
+            >
+              {recording ? "⏹ Stop Scribe" : processing ? "Processing..." : "▶ Start Scribe"}
             </button>
             <div style={{ width: "100%", borderTop: "0.5px solid #e5e7eb", paddingTop: 12 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: GRAY_MID, marginBottom: 8 }}>Action Items Queued</div>
@@ -728,7 +798,7 @@ function PostAppointment({ patient, appointmentId, soapNoteId, onDone }: {
                 </div>
               </div>
             )}
-            {generated && (
+            {genDone && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {fields.map(field => (
                   <div key={field.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -761,7 +831,7 @@ function PostAppointment({ patient, appointmentId, soapNoteId, onDone }: {
               <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
                 <div style={{ flex: 1, background: GREEN_LIGHT, borderRadius: 8, padding: "10px 12px", textAlign: "center" }}>
                   <div style={{ fontSize: 11, color: GREEN, fontWeight: 600 }}>Avg. Confidence</div>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: GREEN }}>{generated ? avgConf : "—"}%</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: GREEN }}>{genDone ? avgConf : "—"}%</div>
                 </div>
                 <div style={{ flex: 1, background: RED_LIGHT, borderRadius: 8, padding: "10px 12px", textAlign: "center" }}>
                   <div style={{ fontSize: 11, color: RED, fontWeight: 600 }}>Needs Review</div>
@@ -854,8 +924,21 @@ export default function Curas() {
 
   const handleSelectPatient = (p: Patient) => {
     setSelectedPatient(p);
-    setPhase("pre");
-    setAppointmentId(import.meta.env.VITE_APPOINTMENT_ID ?? null);
+    if (DEMO_MODE) {
+      setAppointmentId(import.meta.env.VITE_APPOINTMENT_ID ?? "demo-appt-1");
+      setPhase("pre");
+      return;
+    }
+    api.createAppointment(p.id)
+      .then(appt => {
+        setAppointmentId(appt.id);
+        setPhase("pre");
+      })
+      .catch(err => {
+        console.error("Failed to create appointment:", err);
+        setAppointmentId(import.meta.env.VITE_APPOINTMENT_ID ?? null);
+        setPhase("pre");
+      });
   };
 
   const handleBackToList = () => {

@@ -20,10 +20,10 @@ def _get_patient_and_appointment(client, patient_id: str, appointment_id: str) -
         client.table("patients")
         .select("*")
         .eq("id", patient_id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not patient_response.data:
+    if not patient_response or not patient_response.data:
         raise HTTPException(status_code=404, detail="Patient not found")
 
     appointment_response = (
@@ -31,10 +31,10 @@ def _get_patient_and_appointment(client, patient_id: str, appointment_id: str) -
         .select("*")
         .eq("id", appointment_id)
         .eq("patient_id", patient_id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not appointment_response.data:
+    if not appointment_response or not appointment_response.data:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
     return patient_response.data, appointment_response.data

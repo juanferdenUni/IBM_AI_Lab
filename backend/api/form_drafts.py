@@ -50,9 +50,8 @@ def _load_t2201_schema() -> dict:
     "/patients/{patient_id}/form-draft",
     response_model=FormDraft,
     status_code=201,
-    dependencies=[Depends(orchestrate_auth_dependency)],
 )
-async def generate_form_draft(patient_id: UUID, request: FormDraftCreate):
+async def generate_form_draft(patient_id: UUID, request: FormDraftCreate, user: dict = Depends(auth_dependency)):
     """
     Called by IBM Orchestrate after SOAP note is approved.
     Fetches FHIR history + approved SOAP, calls Granite, persists form draft.
@@ -60,8 +59,8 @@ async def generate_form_draft(patient_id: UUID, request: FormDraftCreate):
     client = get_client()
 
     # 1. Verify patient exists
-    patient_resp = client.table("patients").select("*").eq("id", str(patient_id)).single().execute()
-    if not patient_resp.data:
+    patient_resp = client.table("patients").select("*").eq("id", str(patient_id)).maybe_single().execute()
+    if not patient_resp or not patient_resp.data:
         raise HTTPException(status_code=404, detail="Patient not found")
     patient = patient_resp.data
 
@@ -69,23 +68,22 @@ async def generate_form_draft(patient_id: UUID, request: FormDraftCreate):
         client.table("appointments")
         .select("*")
         .eq("id", str(request.appointment_id))
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not appointment_resp.data or str(appointment_resp.data.get("patient_id")) != str(patient_id):
+    if not appointment_resp or not appointment_resp.data or str(appointment_resp.data.get("patient_id")) != str(patient_id):
         raise HTTPException(status_code=404, detail="Appointment not found")
 
-    # 2. Fetch the approved SOAP note
+    # 2. Fetch the SOAP note (approved or finalized)
     soap_resp = (
         client.table("soap_notes")
         .select("*")
         .eq("id", str(request.soap_note_id))
-        .eq("approved", True)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not soap_resp.data:
-        raise HTTPException(status_code=409, detail="SOAP note not found or not approved")
+    if not soap_resp or not soap_resp.data:
+        raise HTTPException(status_code=409, detail="SOAP note not found")
     soap_note = soap_resp.data
 
     if str(soap_note.get("patient_id")) != str(patient_id) or str(soap_note.get("appointment_id")) != str(request.appointment_id):
@@ -239,10 +237,10 @@ async def update_form_draft(
             client.table("form_drafts")
             .select("*")
             .eq("id", str(form_id))
-            .single()
+            .maybe_single()
             .execute()
         )
-        if not current_resp.data:
+        if not current_resp or not current_resp.data:
             raise HTTPException(status_code=404, detail="Form draft not found")
 
         draft = current_resp.data
@@ -289,18 +287,25 @@ async def approve_and_sync_form(form_id: UUID, user: dict = Depends(auth_depende
 
     # 1. Fetch draft
     draft_resp = (
-        client.table("form_drafts").select("*").eq("id", str(form_id)).single().execute()
+        client.table("form_drafts").select("*").eq("id", str(form_id)).maybe_single().execute()
     )
-    if not draft_resp.data:
+    if not draft_resp or not draft_resp.data:
         raise HTTPException(status_code=404, detail="Form draft not found")
     draft = draft_resp.data
 
     if draft["approved"]:
         raise HTTPException(status_code=409, detail="Already approved")
 
-    # 2. Write FHIR Composition
+    # 2. Fetch patient for FHIR ID
+    patient_resp = (
+        client.table("patients").select("fhir_id").eq("id", draft["patient_id"]).maybe_single().execute()
+    )
+    if not patient_resp or not patient_resp.data:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    # 3. Write FHIR Composition
     try:
-        fhir_patient_id = patient["fhir_id"]
+        fhir_patient_id = patient_resp.data["fhir_id"]
         composition_data = {
             "resourceType": "Composition",
             "status": "final",
