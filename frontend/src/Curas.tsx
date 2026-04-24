@@ -1,14 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { DEMO_MODE } from "./config";
 import { api } from "./lib/api";
-import {
-  MOCK_CONTEXT_ITEMS,
-  MOCK_EMR_DOCS,
-  MOCK_FORM_FIELDS,
-  MOCK_PATIENT,
-  MOCK_SOAP_LINES,
-} from "./mockData";
-import type { BillingCode, BriefContent, FormFieldValue, SOAPContent } from "./types";
 
 const TEAL = "#0F6E56";
 const TEAL_LIGHT = "#E1F5EE";
@@ -26,57 +18,139 @@ const GRAY_BG = "#F1EFE8";
 const GRAY_DARK = "#444441";
 const GRAY_MID = "#888780";
 
-type PatientDisplay = typeof MOCK_PATIENT;
-type ContextItem = { label: string; value: string; status: string };
-type FormField = (typeof MOCK_FORM_FIELDS)[number];
+const PHYSICIAN_NAME = "Dr. Sarah Mitchell";
 
-function briefToContextItems(brief: BriefContent): ContextItem[] {
-  const items: ContextItem[] = [];
-  brief.chronic_conditions.forEach(condition =>
-    items.push({ label: "Condition", value: condition, status: "ok" })
-  );
-  brief.recent_labs.slice(0, 3).forEach(lab => {
-    const status = lab.flag ? "warn" : "ok";
-    items.push({ label: lab.test, value: `${lab.value} — ${lab.date}`, status });
-  });
-  if (brief.active_medications.length > 0) {
-    items.push({
-      label: "Active Rx",
-      value: brief.active_medications.join(", "),
-      status: "ok",
-    });
-  }
-  brief.recent_correspondence.forEach(item =>
-    items.push({ label: item.type, value: item.summary, status: "ok" })
-  );
-  brief.missing_data_flags.forEach(flag =>
-    items.push({ label: "Missing", value: flag, status: "danger" })
-  );
-  return items;
+// ─── Types (mirrors backend CONTRACTS.md §3.2) ────────────────────────────────
+
+interface Patient {
+  id: string;
+  fhir_id: string;
+  mrn: string;
+  display_name: string;
+  date_of_birth: string;
+  physician_id: string;
+  workflow_state: string;
+  created_at: string;
+  updated_at: string;
+  // UI-only display fields
+  apptTime?: string;
+  apptType?: string;
+  lastVisit?: string;
 }
 
-function formDraftToFields(formJson: Record<string, FormFieldValue>): FormField[] {
-  return Object.entries(formJson).map(([key, field]) => ({
-    id: key,
-    label: key.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase()),
-    value: field.value === null || field.value === undefined ? "" : String(field.value),
-    confidence: Math.round(field.confidence * 100),
-  }));
+interface ContextItem {
+  label: string;
+  value: string;
+  status: string;
 }
 
-const SOAP_COLORS = {
-  S: { color: BLUE, bg: BLUE_LIGHT },
-  O: { color: TEAL, bg: TEAL_LIGHT },
-  A: { color: AMBER, bg: AMBER_LIGHT },
-  P: { color: GREEN, bg: GREEN_LIGHT },
-};
+interface EmrDoc {
+  name: string;
+}
+
+interface SoapLine {
+  label: string;
+  color: string;
+  bg: string;
+  text: string;
+}
+
+interface FormField {
+  id: string;
+  label: string;
+  value: string;
+  confidence: number;
+}
+
+// ─── Demo Data (used only when DEMO_MODE=true) ────────────────────────────────
+
+const DEMO_PATIENTS: Patient[] = [
+  {
+    id: "demo-1",
+    fhir_id: "hapi-patient-demo-1",
+    mrn: "WARRIOR-001",
+    display_name: "Sarah M.",
+    date_of_birth: "1978-07-22",
+    physician_id: "demo-physician",
+    workflow_state: "pending",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    apptTime: "9:00 AM",
+    apptType: "Follow-up — Type 2 Diabetes",
+    lastVisit: "Oct 12, 2024",
+  },
+  {
+    id: "demo-2",
+    fhir_id: "hapi-patient-demo-2",
+    mrn: "DEMO-002",
+    display_name: "James O.",
+    date_of_birth: "1958-07-22",
+    physician_id: "demo-physician",
+    workflow_state: "pending",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    apptTime: "10:30 AM",
+    apptType: "Annual Physical",
+    lastVisit: "Jan 8, 2025",
+  },
+  {
+    id: "demo-3",
+    fhir_id: "hapi-patient-demo-3",
+    mrn: "DEMO-003",
+    display_name: "Linda T.",
+    date_of_birth: "1983-11-05",
+    physician_id: "demo-physician",
+    workflow_state: "pending",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    apptTime: "11:45 AM",
+    apptType: "Hypertension Check",
+    lastVisit: "Feb 20, 2025",
+  },
+];
+
+const DEMO_CONTEXT_ITEMS: ContextItem[] = [
+  { label: "Last HbA1c",  value: "7.2% — Jan 2025",                  status: "ok"     },
+  { label: "Pending",     value: "ODSP form renewal",                 status: "warn"   },
+  { label: "Recent fax",  value: "Cardiology consult results",        status: "ok"     },
+  { label: "Missing",     value: "Updated medication list",           status: "danger" },
+  { label: "Active Rx",   value: "Metformin 1000mg, Lisinopril 10mg", status: "ok"     },
+  { label: "Allergies",   value: "Penicillin (severe)",               status: "danger" },
+];
+
+const DEMO_EMR_DOCS: EmrDoc[] = [
+  { name: "Lab Results — Jan 2025" },
+  { name: "Cardiology Consult Fax" },
+  { name: "Prescription History"   },
+  { name: "ODSP Renewal Form"      },
+];
+
+const DEMO_SOAP_LINES: SoapLine[] = [
+  { label: "S", color: BLUE,  bg: BLUE_LIGHT,  text: "Patient reports fatigue, increased thirst over past 3 weeks. Denies chest pain. Concerned about ODSP renewal." },
+  { label: "O", color: TEAL,  bg: TEAL_LIGHT,  text: "BP 128/82, HR 74 bpm, Temp 36.8°C. Weight 83kg (stable). HbA1c Jan 2025: 7.2%. Cardiology fax reviewed — no acute findings." },
+  { label: "A", color: AMBER, bg: AMBER_LIGHT, text: "T2DM, stable but symptomatic fatigue. Rule out anemia. ODSP renewal required. Cardiology follow-up noted." },
+  { label: "P", color: GREEN, bg: GREEN_LIGHT, text: "Req. HbA1c, CBC. Refer back to cardiology if symptoms worsen. Complete ODSP form. RTC 3 months." },
+];
+
+const DEMO_FORM_FIELDS: FormField[] = [
+  { id: "f1",  label: "Patient Full Name",        value: "Sarah M.",                                            confidence: 99 },
+  { id: "f2",  label: "Date of Birth",            value: "July 22, 1978",                                       confidence: 99 },
+  { id: "f3",  label: "MRN",                      value: "WARRIOR-001",                                         confidence: 99 },
+  { id: "f4",  label: "Primary Diagnosis",        value: "Type 2 Diabetes Mellitus (E11.9)",                    confidence: 97 },
+  { id: "f5",  label: "Treating Physician",       value: PHYSICIAN_NAME,                                        confidence: 99 },
+  { id: "f6",  label: "Functional Limitations",   value: "Moderate fatigue limiting sustained activity > 2hrs", confidence: 84 },
+  { id: "f7",  label: "Duration of Condition",    value: "Diagnosed 2019 (approx. 7 years)",                    confidence: 91 },
+  { id: "f8",  label: "Current Medications",      value: "Metformin 1000mg BID, Ramipril 5mg OD",               confidence: 96 },
+  { id: "f9",  label: "Last Specialist Visit",    value: "Cardiology — April 2026",                             confidence: 88 },
+  { id: "f10", label: "Prognosis / Permanence",   value: "Chronic, ongoing — not expected to resolve",          confidence: 78 },
+  { id: "f11", label: "Physician Signature Date", value: "",                                                     confidence: 0  },
+  { id: "f12", label: "Additional Notes",         value: "Patient requires follow-up HbA1c in 3 months",        confidence: 82 },
+];
+
+// ─── Shared Components ────────────────────────────────────────────────────────
 
 function Avatar({ name, size = 40 }: { name: string; size?: number }) {
-  const initials = name
-    .split(" ")
-    .map(word => word[0])
-    .join("")
-    .slice(0, 2);
+  const initials = name.split(" ").map((w: string) => w[0]).join("").slice(0, 2);
   return (
     <div
       style={{
@@ -99,15 +173,7 @@ function Avatar({ name, size = 40 }: { name: string; size?: number }) {
   );
 }
 
-function Badge({
-  children,
-  color = TEAL,
-  bg = TEAL_LIGHT,
-}: {
-  children: React.ReactNode;
-  color?: string;
-  bg?: string;
-}) {
+function Badge({ children, color = TEAL, bg = TEAL_LIGHT }: { children: ReactNode; color?: string; bg?: string }) {
   return (
     <span
       style={{
@@ -156,177 +222,208 @@ function ConfidenceBar({ value }: { value: number }) {
   );
 }
 
-function PhaseHeader({
-  phase,
-  onNav,
-}: {
-  phase: string;
-  onNav: (phaseKey: string) => void;
-}) {
-  const phases = [
-    { key: "pre", label: "Pre-Appointment", sub: "Context Engine" },
-    { key: "during", label: "During Appointment", sub: "Active Scribe" },
-    { key: "post", label: "Post-Appointment", sub: "Form Originator" },
-  ];
-
+function AppHeader({ patient, onBackToList }: { patient: Patient | null; onBackToList: (() => void) | null }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        borderBottom: `1.5px solid ${TEAL_DARK}`,
-        background: TEAL_DARK,
+    <>
+      <div style={{
+        background: TEAL_DARK, padding: "10px 24px",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
         fontFamily: "'DM Sans', sans-serif",
-      }}
-    >
-      {phases.map((item, index) => {
-        const active = item.key === phase;
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontWeight: 700, color: "#fff", fontSize: 15 }}>Curas AI</div>
+          {DEMO_MODE && (
+            <span style={{ fontSize: 11, padding: "2px 8px", background: AMBER_LIGHT, color: AMBER, borderRadius: 20, fontWeight: 600 }}>DEMO</span>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
+          {new Date().toLocaleDateString("en-CA", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+        </div>
+      </div>
+      {patient && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 14,
+          padding: "12px 24px", background: "#fff",
+          borderBottom: "0.5px solid #e5e7eb",
+          fontFamily: "'DM Sans', sans-serif",
+        }}>
+          {onBackToList && (
+            <button onClick={onBackToList} style={{
+              background: "none", border: "none", color: TEAL, cursor: "pointer",
+              fontSize: 13, fontWeight: 600, padding: 0, marginRight: 4,
+              fontFamily: "'DM Sans', sans-serif",
+            }}>← Patient List</button>
+          )}
+          <Avatar name={patient.display_name} size={38} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 600, fontSize: 15, color: GRAY_DARK }}>{patient.display_name}</div>
+            <div style={{ fontSize: 12, color: GRAY_MID }}>
+              DOB: {new Date(patient.date_of_birth).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" })} · MRN: {patient.mrn}
+            </div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: TEAL }}>
+              {patient.apptTime ? `${patient.apptTime} — ` : ""}{patient.apptType ?? "Appointment"}
+            </div>
+            <div style={{ fontSize: 12, color: GRAY_MID }}>
+              {PHYSICIAN_NAME}{patient.lastVisit ? ` · Last visit: ${patient.lastVisit}` : ""}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function PhaseHeader({ phase }: { phase: string }) {
+  const phases = [
+    { key: "pre",    label: "Pre-Appointment",    sub: "Context Engine"  },
+    { key: "during", label: "During Appointment", sub: "Active Scribe"   },
+    { key: "post",   label: "Post-Appointment",   sub: "Form Originator" },
+  ];
+  const order = ["pre", "during", "post"];
+  const currentIdx = order.indexOf(phase);
+  return (
+    <div style={{ display: "flex", borderBottom: `1.5px solid ${TEAL_DARK}`, background: TEAL_DARK, fontFamily: "'DM Sans', sans-serif" }}>
+      {phases.map((p, i) => {
+        const active = p.key === phase;
+        const done = i < currentIdx;
         return (
-          <button
-            key={item.key}
-            onClick={() => onNav(item.key)}
-            style={{
-              flex: 1,
-              padding: "14px 0 10px",
-              border: "none",
-              cursor: "pointer",
-              background: active ? TEAL_MID : "transparent",
-              borderRight: index < 2 ? "1px solid rgba(255,255,255,0.15)" : "none",
-              transition: "background 0.2s",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 11,
-                color: active ? "#fff" : "rgba(255,255,255,0.5)",
-                fontWeight: 600,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-              }}
-            >
-              {item.label}
+          <div key={p.key} style={{
+            flex: 1, padding: "14px 0 10px", textAlign: "center",
+            background: active ? TEAL_MID : done ? "rgba(255,255,255,0.08)" : "transparent",
+            borderRight: i < 2 ? `1px solid rgba(255,255,255,0.15)` : "none",
+          }}>
+            <div style={{ fontSize: 11, color: active ? "#fff" : done ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.4)", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              {done ? "✓ " : ""}{p.label}
             </div>
-            <div
-              style={{
-                fontSize: 13,
-                color: active ? "#fff" : "rgba(255,255,255,0.65)",
-                marginTop: 2,
-                fontWeight: 500,
-              }}
-            >
-              {item.sub}
-            </div>
-          </button>
+            <div style={{ fontSize: 13, color: active ? "#fff" : "rgba(255,255,255,0.5)", marginTop: 2, fontWeight: 500 }}>{p.sub}</div>
+          </div>
         );
       })}
     </div>
   );
 }
 
-function PatientBar({ patientDisplay }: { patientDisplay: PatientDisplay }) {
+// ─── 1. PATIENT LIST ──────────────────────────────────────────────────────────
+
+function PatientList({ onSelect }: { onSelect: (p: Patient) => void }) {
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (DEMO_MODE) {
+      setPatients(DEMO_PATIENTS);
+      setLoading(false);
+      return;
+    }
+    api.getPatients()
+      .then(data => { setPatients(data); setLoading(false); })
+      .catch(err => {
+        console.error("Failed to fetch patients:", err);
+        setError("Could not load patients. Check backend connection.");
+        setLoading(false);
+      });
+  }, []);
+
   return (
-    <div
-      className="patient-bar"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 14,
-        padding: "12px 24px",
-        background: "#fff",
-        borderBottom: "0.5px solid #e5e7eb",
-        fontFamily: "'DM Sans', sans-serif",
-      }}
-    >
-      <Avatar name={patientDisplay.name} size={38} />
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 600, fontSize: 15, color: GRAY_DARK }}>
-          {patientDisplay.name}
-        </div>
-        <div style={{ fontSize: 12, color: GRAY_MID }}>
-          DOB:{" "}
-          {new Date(patientDisplay.dob).toLocaleDateString("en-CA", {
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-          })}{" "}
-          · MRN: {patientDisplay.mrn}
+    <div style={{ padding: 24, maxWidth: 700, margin: "0 auto", fontFamily: "'DM Sans', sans-serif" }}>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 20, fontWeight: 700, color: GRAY_DARK }}>Today's Appointments</div>
+        <div style={{ fontSize: 13, color: GRAY_MID, marginTop: 4 }}>
+          {new Date().toLocaleDateString("en-CA", { weekday: "long", year: "numeric", month: "long", day: "numeric" })} · {PHYSICIAN_NAME}
         </div>
       </div>
-      <div className="patient-bar-right" style={{ textAlign: "right" }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: TEAL }}>
-          {patientDisplay.apptTime} — {patientDisplay.apptType}
-        </div>
-        <div style={{ fontSize: 12, color: GRAY_MID }}>
-          {patientDisplay.physician} · Last visit: {patientDisplay.lastVisit}
-        </div>
+
+      {loading && <div style={{ textAlign: "center", padding: 40, color: GRAY_MID, fontSize: 13 }}>Loading patients...</div>}
+
+      {error && (
+        <div style={{ padding: "10px 14px", background: RED_LIGHT, border: `1px solid ${RED}`, borderRadius: 8, fontSize: 13, color: RED, marginBottom: 16 }}>⚠ {error}</div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {patients.map((p) => (
+          <div key={p.id} style={{
+            background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12,
+            padding: "16px 20px", display: "flex", alignItems: "center", gap: 16,
+            cursor: "pointer", transition: "box-shadow 0.2s",
+          }}
+            onClick={() => onSelect(p)}
+            onMouseEnter={e => (e.currentTarget.style.boxShadow = `0 2px 12px rgba(15,110,86,0.12)`)}
+            onMouseLeave={e => (e.currentTarget.style.boxShadow = "none")}
+          >
+            <Avatar name={p.display_name} size={44} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 15, color: GRAY_DARK }}>{p.display_name}</div>
+              <div style={{ fontSize: 12, color: GRAY_MID, marginTop: 2 }}>
+                DOB: {new Date(p.date_of_birth).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" })} · MRN: {p.mrn}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: TEAL }}>{p.apptTime ?? "—"}</div>
+              <div style={{ fontSize: 12, color: GRAY_MID, marginTop: 2 }}>{p.apptType ?? p.workflow_state}</div>
+            </div>
+            <div style={{ padding: "6px 14px", background: TEAL, color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
+              Start →
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-interface PreAppointmentProps {
-  onNext: (briefId?: string) => void;
-  patientId: string | null;
-  appointmentId: string | null;
-}
+// ─── 2. PRE-APPOINTMENT ───────────────────────────────────────────────────────
 
-function PreAppointment({ onNext, patientId, appointmentId }: PreAppointmentProps) {
+function PreAppointment({ patient, appointmentId, onNext }: {
+  patient: Patient;
+  appointmentId: string | null;
+  onNext: (briefId?: string) => void;
+}) {
   const [loadStep, setLoadStep] = useState(0);
   const [started, setStarted] = useState(false);
-  const [contextItems, setContextItems] = useState(MOCK_CONTEXT_ITEMS);
+  const [contextItems, setContextItems] = useState<ContextItem[]>(DEMO_CONTEXT_ITEMS);
   const [briefId, setBriefId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!started) return;
-
     if (DEMO_MODE) {
-      const steps = [500, 900, 1400, 1900, 2500, 3000];
-      steps.forEach((delay, index) => {
-        setTimeout(() => setLoadStep(index + 1), delay);
-      });
+      [500, 900, 1400, 1900].forEach((delay, i) => setTimeout(() => setLoadStep(i + 1), delay));
       return;
     }
-
-    if (!patientId) {
-      setError("Missing patient ID");
-      return;
-    }
-
+    if (!appointmentId) { setError("Missing appointment ID"); return; }
     setLoading(true);
-    setError(null);
-    setLoadStep(1);
-
-    const request = appointmentId
-      ? api.generateContextBrief(patientId, appointmentId)
-      : api.getContextBrief(patientId);
-
-    request
+    api.generateContextBrief(patient.id, appointmentId)
       .then(brief => {
         setBriefId(brief.id);
-        setContextItems(briefToContextItems(brief.brief_json));
-        setLoadStep(6);
+        const items: ContextItem[] = [];
+        brief.brief_json.chronic_conditions.forEach((c: string) =>
+          items.push({ label: "Condition", value: c, status: "ok" }));
+        brief.brief_json.recent_labs.slice(0, 3).forEach((lab: any) =>
+          items.push({ label: lab.test, value: `${lab.value} — ${lab.date}`, status: lab.flag ? "warn" : "ok" }));
+        if (brief.brief_json.active_medications.length > 0)
+          items.push({ label: "Active Rx", value: brief.brief_json.active_medications.join(", "), status: "ok" });
+        brief.brief_json.missing_data_flags.forEach((flag: string) =>
+          items.push({ label: "Missing", value: flag, status: "danger" }));
+        setContextItems(items);
+        setLoadStep(4);
       })
-      .catch(err => {
-        console.error("Context brief error:", err);
-        setError("Could not load context brief from backend");
-        setLoadStep(6);
-      })
+      .catch(err => { console.error(err); setError("Failed to generate context brief — showing demo data"); setLoadStep(4); })
       .finally(() => setLoading(false));
-  }, [started, patientId, appointmentId]);
+  }, [started, patient.id, appointmentId]);
 
-  const emrDocs = DEMO_MODE
-    ? MOCK_EMR_DOCS
-    : [
-        { name: "FHIR Conditions", type: "FHIR", loaded: loadStep > 0 },
-        { name: "Lab Observations", type: "Lab", loaded: loadStep > 1 },
-        { name: "Active Medications", type: "Rx", loaded: loadStep > 2 },
-        { name: "Recent Correspondence", type: "Fax", loaded: loadStep > 3 },
-      ];
+  const emrDocs = DEMO_MODE ? DEMO_EMR_DOCS : [
+    { name: "FHIR Conditions" }, { name: "Lab Observations" },
+    { name: "Active Medications" }, { name: "Recent Correspondence" },
+  ];
 
   return (
     <div style={{ padding: 24, fontFamily: "'DM Sans', sans-serif", maxWidth: 900, margin: "0 auto" }}>
       <div className="grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+
         <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
           <div style={{ background: TEAL, padding: "10px 16px", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 16 }}>🌅</span>
@@ -334,80 +431,30 @@ function PreAppointment({ onNext, patientId, appointmentId }: PreAppointmentProp
             {!DEMO_MODE && <Badge color="#fff" bg="rgba(255,255,255,0.2)">Live</Badge>}
           </div>
           <div style={{ padding: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: GRAY_MID, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-              AI Context Brief
-            </div>
-
-            {error && (
-              <div style={{ padding: "8px 12px", background: RED_LIGHT, border: `1px solid ${RED}`, borderRadius: 6, fontSize: 12, color: RED, marginBottom: 10 }}>
-                {error}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: TEAL_LIGHT, borderRadius: 8, marginBottom: 16 }}>
+              <Avatar name={patient.display_name} size={30} />
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: TEAL_DARK }}>{patient.display_name}</div>
+                <div style={{ fontSize: 11, color: TEAL }}>{patient.apptTime ? `Appt ${patient.apptTime} · ` : ""}{patient.apptType ?? "Appointment"}</div>
               </div>
-            )}
-
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: GRAY_MID, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>AI Context Brief</div>
+            {error && <div style={{ padding: "8px 12px", background: AMBER_LIGHT, border: `1px solid ${AMBER}`, borderRadius: 6, fontSize: 12, color: AMBER, marginBottom: 10 }}>⚠ {error}</div>}
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
-              {contextItems.map((item, index) => (
-                <div
-                  key={`${item.label}-${index}`}
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: 8,
-                    padding: "6px 10px",
-                    background:
-                      item.status === "danger"
-                        ? RED_LIGHT
-                        : item.status === "warn"
-                          ? AMBER_LIGHT
-                          : GRAY_BG,
-                    borderRadius: 6,
-                    fontSize: 12,
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      marginTop: 4,
-                      flexShrink: 0,
-                      background:
-                        item.status === "danger"
-                          ? RED
-                          : item.status === "warn"
-                            ? AMBER
-                            : TEAL_MID,
-                    }}
-                  />
-                  <div>
-                    <span style={{ fontWeight: 600, color: GRAY_DARK }}>{item.label}: </span>
-                    <span style={{ color: GRAY_MID }}>{item.value}</span>
-                  </div>
+              {contextItems.map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 10px", background: item.status === "danger" ? RED_LIGHT : item.status === "warn" ? AMBER_LIGHT : GRAY_BG, borderRadius: 6, fontSize: 12 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", marginTop: 4, flexShrink: 0, background: item.status === "danger" ? RED : item.status === "warn" ? AMBER : TEAL_MID }} />
+                  <div><span style={{ fontWeight: 600, color: GRAY_DARK }}>{item.label}: </span><span style={{ color: GRAY_MID }}>{item.value}</span></div>
                 </div>
               ))}
             </div>
-
-            <button
-              onClick={() => setStarted(true)}
-              disabled={started || loading}
-              style={{
-                width: "100%",
-                padding: "10px 0",
-                background: started ? GRAY_MID : TEAL,
-                color: "#fff",
-                border: "none",
-                borderRadius: 8,
-                fontWeight: 600,
-                fontSize: 13,
-                cursor: started ? "default" : "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 6,
-                fontFamily: "'DM Sans', sans-serif",
-                opacity: loading ? 0.8 : 1,
-              }}
-            >
-              {loading ? "⏳ Loading context..." : started ? "✓ Context Scan Complete" : "▶ Start AI Context Scan"}
+            <button onClick={() => setStarted(true)} disabled={started || loading} style={{
+              width: "100%", padding: "10px 0", background: started ? GRAY_MID : TEAL, color: "#fff",
+              border: "none", borderRadius: 8, fontWeight: 600, fontSize: 13,
+              cursor: started ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              fontFamily: "'DM Sans', sans-serif", opacity: loading ? 0.8 : 1,
+            }}>
+              {loading ? "⏳ Querying FHIR + Granite..." : started ? "✓ Context Scan Complete" : "▶ Start AI Context Scan"}
             </button>
           </div>
         </div>
@@ -419,223 +466,121 @@ function PreAppointment({ onNext, patientId, appointmentId }: PreAppointmentProp
           </div>
           <div style={{ padding: 16 }}>
             <div style={{ fontSize: 12, color: GRAY_MID, marginBottom: 14 }}>
-              {DEMO_MODE
-                ? "Connecting to legacy EMR via SMART on FHIR API. Scanning incoming e-faxes, lab results, and historical records."
-                : "Fetching live FHIR-backed patient context from the backend."}
+              {DEMO_MODE ? "Connecting to legacy EMR via SMART on FHIR API. Scanning incoming e-faxes, lab results, and historical records." : "Querying HAPI FHIR server for conditions, observations, medications, and correspondence."}
             </div>
-
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
               {emrDocs.map((doc, index) => {
                 const loaded = DEMO_MODE ? started && loadStep > index : doc.loaded;
                 return (
-                  <div
-                    key={doc.name}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "8px 12px",
-                      background: loaded ? GREEN_LIGHT : GRAY_BG,
-                      borderRadius: 8,
-                      transition: "background 0.4s",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 20,
-                        height: 20,
-                        borderRadius: "50%",
-                        background: loaded ? GREEN : "#d1d5db",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 11,
-                        color: "#fff",
-                        flexShrink: 0,
-                        transition: "background 0.4s",
-                      }}
-                    >
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: loaded ? GREEN_LIGHT : GRAY_BG, borderRadius: 8, transition: "background 0.4s" }}>
+                    <div style={{ width: 20, height: 20, borderRadius: "50%", background: loaded ? GREEN : "#d1d5db", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#fff", flexShrink: 0, transition: "background 0.4s" }}>
                       {loaded ? "✓" : "…"}
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: GRAY_DARK }}>{doc.name}</div>
-                    </div>
-                    <Badge color={loaded ? GREEN : GRAY_MID} bg={loaded ? GREEN_LIGHT : GRAY_BG}>
-                      {loaded ? "Loaded" : "Pending"}
-                    </Badge>
+                    <div style={{ flex: 1, fontSize: 12, fontWeight: 600, color: GRAY_DARK }}>{doc.name}</div>
+                    <Badge color={loaded ? GREEN : GRAY_MID} bg={loaded ? GREEN_LIGHT : GRAY_BG}>{loaded ? "Loaded" : "Pending"}</Badge>
                   </div>
                 );
               })}
             </div>
-
             {loadStep >= 4 && (
-              <div style={{ padding: "10px 14px", background: GREEN_LIGHT, border: "1px solid #97C459", borderRadius: 8, fontSize: 12, color: GREEN, animation: "fadeIn 0.4s ease" }}>
+              <div style={{ padding: "10px 14px", background: GREEN_LIGHT, border: `1px solid #97C459`, borderRadius: 8, fontSize: 12, color: GREEN, animation: "fadeIn 0.4s ease" }}>
                 ✅ <strong>{emrDocs.length} of {emrDocs.length} sources loaded.</strong> Context brief ready for review.
               </div>
             )}
+            <div style={{ marginTop: 14, borderTop: "0.5px solid #e5e7eb", paddingTop: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: GRAY_MID, marginBottom: 6 }}>FHIR API Status</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {["EMR Connected", "e-Fax Active", "Lab API Ready"].map((s, i) => (
+                  <div key={i} style={{ fontSize: 11, padding: "3px 8px", background: started ? GREEN_LIGHT : GRAY_BG, color: started ? GREEN : GRAY_MID, borderRadius: 20, fontWeight: 600, transition: "all 0.5s" }}>{s}</div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       {loadStep >= 4 && (
         <div style={{ marginTop: 20, textAlign: "center" }}>
-          <button
-            onClick={() => onNext(briefId ?? undefined)}
-            style={{
-              padding: "12px 36px",
-              background: TEAL,
-              color: "#fff",
-              border: "none",
-              borderRadius: 8,
-              fontWeight: 700,
-              fontSize: 14,
-              cursor: "pointer",
-              fontFamily: "'DM Sans', sans-serif",
-              boxShadow: `0 2px 12px ${TEAL}44`,
-            }}
-          >
-            Patient arrived — Begin Appointment →
+          {/* FIX: Button says "Start Appointment →" per CONTRACTS.md */}
+          <button onClick={() => onNext(briefId ?? undefined)} style={{ padding: "12px 36px", background: TEAL, color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", boxShadow: `0 2px 12px ${TEAL}44` }}>
+            Start Appointment →
           </button>
         </div>
       )}
-
-      <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }`}</style>
+      <style>{`@keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }`}</style>
     </div>
   );
 }
 
-interface DuringAppointmentProps {
-  onNext: (soapNoteId?: string) => void;
-  patientId: string | null;
-  appointmentId: string | null;
-}
+// ─── 3. DURING APPOINTMENT ────────────────────────────────────────────────────
 
-function DuringAppointment({ onNext, patientId, appointmentId }: DuringAppointmentProps) {
+function DuringAppointment({ patient, appointmentId, onNext }: {
+  patient: Patient;
+  appointmentId: string | null;
+  onNext: (soapNoteId?: string) => void;
+}) {
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [soapStep, setSoapStep] = useState(0);
   const [pulse, setPulse] = useState(false);
-  const [realSoap, setRealSoap] = useState<SOAPContent | null>(null);
-  const [realBillingCodes, setRealBillingCodes] = useState<BillingCode[]>([]);
-  const [transcript, setTranscript] = useState("");
+  // FIX: SOAP lines are editable state, not read-only
+  const [soapLines, setSoapLines] = useState<SoapLine[]>(DEMO_SOAP_LINES.map(l => ({ ...l })));
   const [soapNoteId, setSoapNoteId] = useState<string | null>(null);
-  const [streamDone, setStreamDone] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    if (DEMO_MODE || !patientId) return;
-
-    api.getSOAPNote(patientId)
-      .then(note => {
-        setRealSoap(note.soap_json);
-        setRealBillingCodes(note.billing_codes);
-        setSoapNoteId(note.id);
-        setSoapStep(4);
-        setStreamDone(true);
-      })
-      .catch(() => {
-        // No existing SOAP note yet; user can still try live transcription flow.
-      });
-  }, [patientId]);
-
-  useEffect(() => {
-    if (!recording) {
+    if (recording) {
+      timerRef.current = setInterval(() => { setElapsed(e => e + 1); setPulse(p => !p); }, 1000);
+      if (DEMO_MODE) {
+        [1500, 3000, 5000, 7000].forEach((d, i) => setTimeout(() => setSoapStep(i + 1), d));
+      } else {
+        if (!patient.id) return;
+        const token = localStorage.getItem("supabase_token") ?? "";
+        const es = new EventSource(`${import.meta.env.VITE_API_BASE_URL}/api/patients/${patient.id}/appointment/stream?token=${token}`);
+        esRef.current = es;
+        es.addEventListener("soap_update", (e: MessageEvent) => {
+          const soap = JSON.parse(e.data);
+          setSoapLines([
+            { label: "S", color: BLUE,  bg: BLUE_LIGHT,  text: soap.subjective },
+            { label: "O", color: TEAL,  bg: TEAL_LIGHT,  text: soap.objective  },
+            { label: "A", color: AMBER, bg: AMBER_LIGHT, text: soap.assessment },
+            { label: "P", color: GREEN, bg: GREEN_LIGHT, text: soap.plan       },
+          ]);
+          setSoapStep(s => Math.min(s + 1, 4));
+        });
+        es.addEventListener("done", () => {
+          es.close(); setSoapStep(4);
+          if (timerRef.current) clearInterval(timerRef.current);
+          if (patient.id && appointmentId)
+            api.endAppointment(patient.id, appointmentId).then(note => setSoapNoteId(note.id)).catch(console.error);
+        });
+        es.onerror = () => { console.warn("SSE error"); es.close(); };
+      }
+    } else {
       if (timerRef.current) clearInterval(timerRef.current);
       esRef.current?.close();
-      return;
     }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); esRef.current?.close(); };
+  }, [recording, patient.id, appointmentId]);
 
-    timerRef.current = setInterval(() => {
-      setElapsed(value => value + 1);
-      setPulse(value => !value);
-    }, 1000);
+  const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
-    if (DEMO_MODE) {
-      const steps = [1500, 3000, 5000, 7000];
-      steps.forEach((delay, index) => setTimeout(() => setSoapStep(index + 1), delay));
-      return () => {
-        if (timerRef.current) clearInterval(timerRef.current);
-      };
-    }
+  // FIX: SOAP is editable
+  const handleSoapEdit = (i: number, val: string) =>
+    setSoapLines(prev => prev.map((l, idx) => idx === i ? { ...l, text: val } : l));
 
-    if (!patientId || !appointmentId) {
-      return () => {
-        if (timerRef.current) clearInterval(timerRef.current);
-      };
-    }
-
-    const es = api.streamAppointment(patientId, appointmentId);
-    esRef.current = es;
-
-    es.addEventListener("soap_update", (event: MessageEvent) => {
-      const soap = JSON.parse(event.data) as SOAPContent;
-      setRealSoap(soap);
-      setSoapStep(step => Math.min(step + 1, 4));
-    });
-
-    es.addEventListener("transcript_chunk", (event: MessageEvent) => {
-      const chunk = JSON.parse(event.data) as { text: string };
-      setTranscript(value => (value ? `${value} ${chunk.text}` : chunk.text));
-    });
-
-    es.addEventListener("billing_code_detected", (event: MessageEvent) => {
-      const code = JSON.parse(event.data) as BillingCode;
-      setRealBillingCodes(previous => [...previous, code]);
-      setSoapStep(step => Math.min(step + 1, 4));
-    });
-
-    es.addEventListener("done", () => {
-      es.close();
-      setStreamDone(true);
-      setSoapStep(4);
-      if (timerRef.current) clearInterval(timerRef.current);
-      api.endAppointment(patientId, appointmentId)
-        .then(note => setSoapNoteId(note.id))
-        .catch(err => console.error("endAppointment error:", err));
-    });
-
-    es.onerror = () => {
-      es.close();
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      es.close();
-    };
-  }, [recording, patientId, appointmentId]);
-
-  const formatElapsed = (seconds: number) =>
-    `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-
-  const soapSections = realSoap
-    ? [
-        { label: "S" as const, text: realSoap.subjective },
-        { label: "O" as const, text: realSoap.objective },
-        { label: "A" as const, text: realSoap.assessment },
-        { label: "P" as const, text: realSoap.plan },
-      ].filter(section => section.text)
-    : MOCK_SOAP_LINES.slice(0, soapStep).map(item => ({
-        label: item.label as "S" | "O" | "A" | "P",
-        text: item.text,
-      }));
-
-  const actionItems = DEMO_MODE
-    ? [
-        { label: "HbA1c Lab Req.", ready: soapStep >= 3 },
-        { label: "CBC Lab Req.", ready: soapStep >= 4 },
-        { label: "OHIP Billing — A879A", ready: soapStep >= 4 },
-        { label: "ODSP Form Flag", ready: soapStep >= 2 },
-      ]
-    : realBillingCodes.map(code => ({
-        label: `${code.code} — ${code.description}`,
-        ready: true,
-      }));
+  const actionItems = [
+    { label: "HbA1c Lab Req.",       ready: soapStep >= 3 },
+    { label: "CBC Lab Req.",         ready: soapStep >= 4 },
+    { label: "OHIP Billing — A879A", ready: soapStep >= 4 },
+    { label: "ODSP Form Flag",       ready: soapStep >= 2 },
+  ];
 
   return (
     <div style={{ padding: 24, fontFamily: "'DM Sans', sans-serif", maxWidth: 900, margin: "0 auto" }}>
       <div className="grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 20 }}>
+
         <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
           <div style={{ background: "#1a1a2e", padding: "10px 16px", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 16 }}>🎙️</span>
@@ -644,71 +589,20 @@ function DuringAppointment({ onNext, patientId, appointmentId }: DuringAppointme
           </div>
           <div style={{ padding: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
             <div style={{ position: "relative" }}>
-              <div
-                onClick={() => !streamDone && setRecording(value => !value)}
-                style={{
-                  width: 70,
-                  height: 70,
-                  borderRadius: "50%",
-                  background: recording ? (pulse ? "#fee2e2" : RED_LIGHT) : GRAY_BG,
-                  border: `2px solid ${recording ? RED : "#d1d5db"}`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 28,
-                  transition: "all 0.3s",
-                  cursor: streamDone ? "default" : "pointer",
-                }}
-              >
-                🎙️
-              </div>
-              {recording && (
-                <div style={{ position: "absolute", bottom: -6, right: -6, background: RED, color: "#fff", fontSize: 9, fontWeight: 800, padding: "2px 5px", borderRadius: 4, letterSpacing: "0.1em" }}>
-                  REC
-                </div>
-              )}
+              <div style={{ width: 70, height: 70, borderRadius: "50%", background: recording ? (pulse ? "#fee2e2" : RED_LIGHT) : GRAY_BG, border: `2px solid ${recording ? RED : "#d1d5db"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, transition: "all 0.3s", cursor: "pointer" }} onClick={() => setRecording(r => !r)}>🎙️</div>
+              {recording && <div style={{ position: "absolute", bottom: -6, right: -6, background: RED, color: "#fff", fontSize: 9, fontWeight: 800, padding: "2px 5px", borderRadius: 4, letterSpacing: "0.1em" }}>REC</div>}
             </div>
-
             <div style={{ fontSize: 13, color: recording ? RED : GRAY_MID, fontWeight: 600 }}>
               {streamDone ? "✓ Data loaded" : recording ? `Recording — ${formatElapsed(elapsed)}` : "Tap to start recording"}
             </div>
-
-            {!DEMO_MODE && transcript && (
-              <div style={{ width: "100%", fontSize: 11, color: GRAY_MID, fontFamily: "'DM Mono', monospace", maxHeight: 80, overflow: "hidden" }}>
-                {transcript.slice(-300)}
-              </div>
-            )}
-
-            <button
-              onClick={() => !streamDone && setRecording(value => !value)}
-              disabled={streamDone}
-              style={{
-                padding: "8px 24px",
-                background: recording ? RED_LIGHT : TEAL,
-                color: recording ? RED : "#fff",
-                border: `1px solid ${recording ? RED : TEAL}`,
-                borderRadius: 8,
-                fontWeight: 600,
-                fontSize: 13,
-                cursor: streamDone ? "default" : "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-                opacity: streamDone ? 0.6 : 1,
-              }}
-            >
-              {streamDone ? "✓ Loaded" : recording ? "⏹ Stop Scribe" : "▶ Start Scribe"}
+            <button onClick={() => setRecording(r => !r)} style={{ padding: "8px 24px", background: recording ? RED_LIGHT : TEAL, color: recording ? RED : "#fff", border: `1px solid ${recording ? RED : TEAL}`, borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
+              {recording ? "⏹ Stop Scribe" : "▶ Start Scribe"}
             </button>
-
             <div style={{ width: "100%", borderTop: "0.5px solid #e5e7eb", paddingTop: 12 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: GRAY_MID, marginBottom: 8 }}>Action Items Queued</div>
-              {actionItems.length === 0 && !DEMO_MODE && (
-                <div style={{ fontSize: 12, color: GRAY_MID }}>
-                  Waiting for billing codes or existing SOAP data...
-                </div>
-              )}
-              {actionItems.map((item, index) => (
-                <div key={`${item.label}-${index}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 12, color: item.ready ? GREEN : GRAY_MID }}>
-                  <span style={{ fontSize: 14 }}>{item.ready ? "✅" : "⏳"}</span>
-                  {item.label}
+              {actionItems.map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 12, color: item.ready ? GREEN : GRAY_MID }}>
+                  <span style={{ fontSize: 14 }}>{item.ready ? "✅" : "⏳"}</span>{item.label}
                 </div>
               ))}
             </div>
@@ -719,33 +613,28 @@ function DuringAppointment({ onNext, patientId, appointmentId }: DuringAppointme
           <div style={{ background: "#1D2B3A", padding: "10px 16px", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 16 }}>📋</span>
             <span style={{ fontWeight: 600, color: "#fff", fontSize: 14 }}>SOAP Draft</span>
-            {soapStep > 0 && (
-              <Badge color="#fff" bg="rgba(255,255,255,0.15)">
-                {DEMO_MODE ? "AI-generated · live" : "Backend-loaded · live"}
-              </Badge>
-            )}
+            {soapStep > 0 && <Badge color="#fff" bg="rgba(255,255,255,0.15)">{DEMO_MODE ? "AI-generated · editable" : "Granite · editable"}</Badge>}
           </div>
           <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-            {soapStep === 0 && (
-              <div style={{ textAlign: "center", padding: "40px 20px", color: GRAY_MID, fontSize: 13 }}>
-                Start recording or load an existing SOAP note from the backend...
-              </div>
-            )}
-            {soapSections.map((section, index) => {
-              const colors = SOAP_COLORS[section.label];
-              return (
-                <div key={`${section.label}-${index}`} style={{ display: "flex", gap: 10, padding: "10px 12px", background: colors.bg, borderRadius: 8, animation: "fadeIn 0.5s ease" }}>
-                  <div style={{ fontWeight: 800, fontSize: 13, color: colors.color, minWidth: 16, fontFamily: "'DM Mono', monospace" }}>
-                    {section.label}:
-                  </div>
-                  <div style={{ fontSize: 13, color: GRAY_DARK, lineHeight: 1.5 }}>{section.text}</div>
+            {soapStep === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px 20px", color: GRAY_MID, fontSize: 13 }}>Start recording to generate SOAP note in real-time...</div>
+            ) : (
+              soapLines.slice(0, soapStep).map((line, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, padding: "10px 12px", background: line.bg, borderRadius: 8, animation: "fadeIn 0.5s ease" }}>
+                  <div style={{ fontWeight: 800, fontSize: 13, color: line.color, minWidth: 16, fontFamily: "'DM Mono', monospace", paddingTop: 2 }}>{line.label}:</div>
+                  {/* FIX: editable textarea, not read-only div */}
+                  <textarea
+                    value={line.text}
+                    onChange={e => handleSoapEdit(i, e.target.value)}
+                    rows={3}
+                    style={{ flex: 1, fontSize: 13, color: GRAY_DARK, lineHeight: 1.5, background: "transparent", border: `1px solid ${line.color}33`, borderRadius: 6, padding: "4px 8px", resize: "vertical", fontFamily: "'DM Sans', sans-serif", outline: "none" }}
+                  />
                 </div>
-              );
-            })}
-
+              ))
+            )}
             {soapStep >= 4 && (
               <div style={{ marginTop: 8, padding: "10px 14px", background: GREEN_LIGHT, borderRadius: 8, fontSize: 12, color: GREEN }}>
-                ✅ SOAP note ready for physician review.
+                ✅ SOAP note complete. Review and edit above, then end the appointment.
               </div>
             )}
           </div>
@@ -754,116 +643,75 @@ function DuringAppointment({ onNext, patientId, appointmentId }: DuringAppointme
 
       {soapStep >= 4 && (
         <div style={{ marginTop: 20, textAlign: "center" }}>
-          <button
-            onClick={() => onNext(soapNoteId ?? undefined)}
-            style={{
-              padding: "12px 36px",
-              background: TEAL,
-              color: "#fff",
-              border: "none",
-              borderRadius: 8,
-              fontWeight: 700,
-              fontSize: 14,
-              cursor: "pointer",
-              fontFamily: "'DM Sans', sans-serif",
-              boxShadow: `0 2px 12px ${TEAL}44`,
-            }}
-          >
-            Appointment complete — Generate Forms →
+          {/* FIX: Button says "End Appointment →" per CONTRACTS.md */}
+          <button onClick={() => onNext(soapNoteId ?? undefined)} style={{ padding: "12px 36px", background: TEAL, color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", boxShadow: `0 2px 12px ${TEAL}44` }}>
+            End Appointment →
           </button>
         </div>
       )}
+      <style>{`@keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }`}</style>
     </div>
   );
 }
 
-interface PostAppointmentProps {
-  patientId: string | null;
+// ─── 4. POST-APPOINTMENT ──────────────────────────────────────────────────────
+
+function PostAppointment({ patient, appointmentId, soapNoteId, onDone }: {
+  patient: Patient;
   appointmentId: string | null;
   soapNoteId: string | null;
-}
-
-function PostAppointment({ patientId, appointmentId, soapNoteId }: PostAppointmentProps) {
-  const [fields, setFields] = useState<FormField[]>(MOCK_FORM_FIELDS.map(field => ({ ...field })));
+  onDone: () => void;
+}) {
+  const [fields, setFields] = useState<FormField[]>(DEMO_FORM_FIELDS.map(f => ({ ...f })));
   const [formDraftId, setFormDraftId] = useState<string | null>(null);
   const [approved, setApproved] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [generated, setGenerated] = useState(false);
+  const [generating, setGenerating] = useState(true);
+  const [genDone, setGenDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (DEMO_MODE) {
-      setGenerating(true);
-      setTimeout(() => {
-        setGenerating(false);
-        setGenerated(true);
-      }, 2000);
+    if (DEMO_MODE || !patient.id || !appointmentId || !soapNoteId) {
+      setTimeout(() => { setGenerating(false); setGenDone(true); }, 2000);
       return;
     }
-
-    if (!patientId) {
-      setError("Missing patient ID");
-      setGenerated(true);
-      return;
-    }
-
     setGenerating(true);
-    setError(null);
-
-    const request =
-      appointmentId && soapNoteId
-        ? api.generateFormDraft(patientId, appointmentId, soapNoteId)
-        : api.getFormDraft(patientId);
-
-    request
+    api.generateFormDraft(patient.id, appointmentId, soapNoteId)
       .then(draft => {
         setFormDraftId(draft.id);
-        setFields(formDraftToFields(draft.form_json));
-        setGenerated(true);
+        const converted: FormField[] = Object.entries(draft.form_json).map(([key, field]: [string, any]) => ({
+          id: key,
+          label: key.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+          value: field.value === null || field.value === undefined ? "" : String(field.value),
+          confidence: Math.round(field.confidence * 100),
+        }));
+        setFields(converted);
+        setGenDone(true);
       })
-      .catch(err => {
-        console.error("Form draft error:", err);
-        setError("Could not load form draft from backend");
-        setFields(MOCK_FORM_FIELDS.map(field => ({ ...field })));
-        setGenerated(true);
-      })
+      .catch(err => { console.error(err); setError("Could not generate form — showing demo data"); setGenDone(true); })
       .finally(() => setGenerating(false));
-  }, [patientId, appointmentId, soapNoteId]);
+  }, [patient.id, appointmentId, soapNoteId]);
 
-  const handleChange = (id: string, value: string) => {
-    setFields(previous => previous.map(field => (field.id === id ? { ...field, value } : field)));
+  const autoFilled = fields.filter(f => f.confidence > 0).length;
+  const avgConf = autoFilled > 0 ? Math.round(fields.filter(f => f.confidence > 0).reduce((a, f) => a + f.confidence, 0) / autoFilled) : 0;
 
-    if (!DEMO_MODE && formDraftId) {
-      api.updateFormDraft(formDraftId, {
-        [id]: { value, confidence: 1.0, source: "physician_edit" },
-      }).catch(err => console.error("updateFormDraft error:", err));
-    }
+  const handleChange = (id: string, val: string) => {
+    setFields(prev => prev.map(f => f.id === id ? { ...f, value: val } : f));
+    if (!DEMO_MODE && formDraftId)
+      api.updateFormDraft(formDraftId, { [id]: { value: val, confidence: 1.0, source: "physician_edit" } }).catch(console.error);
   };
 
   const handleApprove = async () => {
     if (!DEMO_MODE && formDraftId) {
-      try {
-        await api.approveFormDraft(formDraftId);
-      } catch (err) {
-        console.error("approveFormDraft error:", err);
-      }
+      try { await api.approveFormDraft(formDraftId); } catch (err) { console.error(err); }
     }
     setApproved(true);
+    setTimeout(() => onDone(), 1200);
   };
-
-  const autoFilled = fields.filter(field => field.confidence > 0).length;
-  const avgConf =
-    autoFilled > 0
-      ? Math.round(
-          fields
-            .filter(field => field.confidence > 0)
-            .reduce((total, field) => total + field.confidence, 0) / autoFilled
-        )
-      : 0;
 
   return (
     <div style={{ padding: 24, fontFamily: "'DM Sans', sans-serif", maxWidth: 900, margin: "0 auto" }}>
       <div className="grid-2col" style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 20 }}>
+
         <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
           <div style={{ background: "#2D1B6B", padding: "10px 16px", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 16 }}>📄</span>
@@ -871,16 +719,10 @@ function PostAppointment({ patientId, appointmentId, soapNoteId }: PostAppointme
             {!DEMO_MODE && <Badge color="#fff" bg="rgba(255,255,255,0.2)">Live</Badge>}
           </div>
           <div style={{ padding: 16 }}>
-            {error && (
-              <div style={{ padding: "8px 12px", background: AMBER_LIGHT, border: `1px solid ${AMBER}`, borderRadius: 6, fontSize: 12, color: AMBER, marginBottom: 10 }}>
-                {error}
-              </div>
-            )}
+            {error && <div style={{ padding: "8px 12px", background: AMBER_LIGHT, border: `1px solid ${AMBER}`, borderRadius: 6, fontSize: 12, color: AMBER, marginBottom: 10 }}>⚠ {error}</div>}
             {generating && (
               <div style={{ textAlign: "center", padding: "24px 0", color: GRAY_MID, fontSize: 13 }}>
-                <div style={{ marginBottom: 8 }}>
-                  🤖 {DEMO_MODE ? "Mapping clinical notes to form fields..." : "Loading form draft from backend..."}
-                </div>
+                <div style={{ marginBottom: 8 }}>🤖 {DEMO_MODE ? "Mapping clinical notes to form fields..." : "Calling Granite to populate T2201..."}</div>
                 <div style={{ height: 4, background: GRAY_BG, borderRadius: 99, overflow: "hidden" }}>
                   <div style={{ height: "100%", background: TEAL, borderRadius: 99, animation: "loadBar 2s ease forwards" }} />
                 </div>
@@ -891,28 +733,10 @@ function PostAppointment({ patientId, appointmentId, soapNoteId }: PostAppointme
                 {fields.map(field => (
                   <div key={field.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <label style={{ fontSize: 11, fontWeight: 600, color: GRAY_MID, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                        {field.label}
-                      </label>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: GRAY_MID, textTransform: "uppercase", letterSpacing: "0.05em" }}>{field.label}</label>
                       {field.confidence > 0 && <ConfidenceBar value={field.confidence} />}
                     </div>
-                    <input
-                      value={field.value}
-                      onChange={event => handleChange(field.id, event.target.value)}
-                      placeholder={field.confidence === 0 ? "⚠ Requires physician input" : ""}
-                      style={{
-                        width: "100%",
-                        padding: "7px 10px",
-                        fontSize: 13,
-                        border: `0.5px solid ${field.confidence === 0 ? RED : field.confidence < 85 ? AMBER : "#e5e7eb"}`,
-                        borderRadius: 6,
-                        background: field.confidence === 0 ? RED_LIGHT : "#fff",
-                        color: GRAY_DARK,
-                        fontFamily: "'DM Sans', sans-serif",
-                        outline: "none",
-                        boxSizing: "border-box",
-                      }}
-                    />
+                    <input value={field.value} onChange={e => handleChange(field.id, e.target.value)} placeholder={field.confidence === 0 ? "⚠ Requires physician input" : ""} style={{ width: "100%", padding: "7px 10px", fontSize: 13, border: `0.5px solid ${field.confidence === 0 ? RED : field.confidence < 85 ? AMBER : "#e5e7eb"}`, borderRadius: 6, background: field.confidence === 0 ? RED_LIGHT : "#fff", color: GRAY_DARK, fontFamily: "'DM Sans', sans-serif", outline: "none", boxSizing: "border-box" }} />
                   </div>
                 ))}
               </div>
@@ -930,13 +754,10 @@ function PostAppointment({ patientId, appointmentId, soapNoteId }: PostAppointme
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 12, color: GRAY_MID, marginBottom: 4 }}>Auto-fill Coverage</div>
                 <div style={{ height: 10, background: GRAY_BG, borderRadius: 99, overflow: "hidden" }}>
-                  <div style={{ width: `${Math.round((autoFilled / fields.length) * 100)}%`, height: "100%", background: TEAL, borderRadius: 99 }} />
+                  <div style={{ width: `${fields.length > 0 ? Math.round(autoFilled / fields.length * 100) : 0}%`, height: "100%", background: TEAL, borderRadius: 99 }} />
                 </div>
-                <div style={{ fontSize: 12, color: TEAL, marginTop: 4, fontWeight: 600 }}>
-                  {autoFilled} of {fields.length} sections auto-filled
-                </div>
+                <div style={{ fontSize: 12, color: TEAL, marginTop: 4, fontWeight: 600 }}>{autoFilled} of {fields.length} sections auto-filled</div>
               </div>
-
               <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
                 <div style={{ flex: 1, background: GREEN_LIGHT, borderRadius: 8, padding: "10px 12px", textAlign: "center" }}>
                   <div style={{ fontSize: 11, color: GREEN, fontWeight: 600 }}>Avg. Confidence</div>
@@ -945,22 +766,18 @@ function PostAppointment({ patientId, appointmentId, soapNoteId }: PostAppointme
                 <div style={{ flex: 1, background: RED_LIGHT, borderRadius: 8, padding: "10px 12px", textAlign: "center" }}>
                   <div style={{ fontSize: 11, color: RED, fontWeight: 600 }}>Needs Review</div>
                   <div style={{ fontSize: 22, fontWeight: 700, color: RED }}>
-                    {generated
-                      ? fields.filter(field => field.confidence < 85 && field.confidence > 0).length +
-                        fields.filter(field => field.confidence === 0).length
-                      : "—"}
+                    {genDone ? fields.filter(f => f.confidence < 85 && f.confidence > 0).length + fields.filter(f => f.confidence === 0).length : "—"}
                   </div>
                 </div>
               </div>
-
               <div style={{ borderTop: "0.5px solid #e5e7eb", paddingTop: 12, marginBottom: 12 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: GRAY_MID, marginBottom: 8 }}>Field Status</div>
                 {[
-                  { label: "High confidence (≥90%)", count: fields.filter(field => field.confidence >= 90).length, color: GREEN },
-                  { label: "Needs review (75–89%)", count: fields.filter(field => field.confidence >= 75 && field.confidence < 90).length, color: AMBER },
-                  { label: "Physician required", count: fields.filter(field => field.confidence < 75).length, color: RED },
-                ].map(item => (
-                  <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
+                  { label: "High confidence (≥90%)", count: fields.filter(f => f.confidence >= 90).length, color: GREEN },
+                  { label: "Needs review (75–89%)",  count: fields.filter(f => f.confidence >= 75 && f.confidence < 90).length, color: AMBER },
+                  { label: "Physician required",     count: fields.filter(f => f.confidence < 75).length, color: RED },
+                ].map((item, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: GRAY_DARK }}>
                       <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.color }} />
                       {item.label}
@@ -969,138 +786,108 @@ function PostAppointment({ patientId, appointmentId, soapNoteId }: PostAppointme
                   </div>
                 ))}
               </div>
-
               {!approved ? (
-                <button
-                  onClick={handleApprove}
-                  disabled={!generated}
-                  style={{
-                    width: "100%",
-                    padding: "11px 0",
-                    background: generated ? TEAL : "#d1d5db",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 8,
-                    fontWeight: 700,
-                    fontSize: 13,
-                    cursor: generated ? "pointer" : "not-allowed",
-                    fontFamily: "'DM Sans', sans-serif",
-                  }}
-                >
+                <button onClick={handleApprove} disabled={!genDone} style={{ width: "100%", padding: "11px 0", background: genDone ? TEAL : "#d1d5db", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: genDone ? "pointer" : "not-allowed", fontFamily: "'DM Sans', sans-serif" }}>
                   ✓ Approve & Sync to EMR
                 </button>
               ) : (
-                <div style={{ width: "100%", padding: "11px 0", background: GREEN_LIGHT, border: "1px solid #97C459", borderRadius: 8, fontWeight: 700, fontSize: 13, color: GREEN, textAlign: "center" }}>
+                <div style={{ width: "100%", padding: "11px 0", background: GREEN_LIGHT, border: `1px solid #97C459`, borderRadius: 8, fontWeight: 700, fontSize: 13, color: GREEN, textAlign: "center" }}>
                   ✅ Approved & Synced to EMR
                 </div>
               )}
             </div>
           </div>
-
           <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12, padding: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: GRAY_MID, marginBottom: 8 }}>Data Sources Used</div>
             {(DEMO_MODE
               ? ["SOAP Note (Active Scribe)", "Lab Results — Jan 2025", "Prescription History", "Cardiology Consult Fax"]
-              : ["SOAP Note", "Context Brief", "FHIR Conditions", "FHIR Observations", "FHIR Medications"])
-              .map(source => (
-                <div key={source} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", fontSize: 12, color: GRAY_DARK }}>
-                  <span style={{ color: TEAL, fontSize: 14 }}>✓</span> {source}
-                </div>
-              ))}
+              : ["SOAP Note (Granite Scribe)", "FHIR Conditions", "FHIR Observations", "FHIR Medications", "FHIR Correspondence"]
+            ).map((s, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", fontSize: 12, color: GRAY_DARK }}>
+                <span style={{ color: TEAL, fontSize: 14 }}>✓</span> {s}
+              </div>
+            ))}
           </div>
         </div>
       </div>
-
       <style>{`
         @keyframes loadBar { from { width: 0%; } to { width: 100%; } }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-        @media (max-width: 768px) {
-          .grid-2col { grid-template-columns: 1fr !important; }
-          .patient-bar { flex-direction: column !important; align-items: flex-start !important; }
-          .patient-bar-right { text-align: left !important; }
-        }
+        @keyframes fadeIn  { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+        @media (max-width: 768px) { .grid-2col { grid-template-columns: 1fr !important; } }
       `}</style>
     </div>
   );
 }
 
+// ─── 5. COMPLETION SCREEN ─────────────────────────────────────────────────────
+
+// FIX: Completion screen exists — "All done for Sarah M."
+function CompletionScreen({ patient, onBackToList }: { patient: Patient; onBackToList: () => void }) {
+  return (
+    <div style={{ padding: 60, textAlign: "center", fontFamily: "'DM Sans', sans-serif", maxWidth: 600, margin: "0 auto" }}>
+      <div style={{ fontSize: 56, marginBottom: 20 }}>✅</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color: GRAY_DARK, marginBottom: 8 }}>
+        All done for {patient.display_name}.
+      </div>
+      <div style={{ fontSize: 14, color: GRAY_MID, marginBottom: 32 }}>
+        SOAP note approved · T2201 synced to EMR · Audit trail recorded
+      </div>
+      <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginBottom: 40 }}>
+        {["SOAP Note Saved", "Form Synced", "Billing Queued", "Audit Logged"].map((s, i) => (
+          <div key={i} style={{ padding: "8px 16px", background: GREEN_LIGHT, color: GREEN, borderRadius: 20, fontSize: 13, fontWeight: 600 }}>✓ {s}</div>
+        ))}
+      </div>
+      <button onClick={onBackToList} style={{ padding: "13px 36px", background: TEAL, color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", boxShadow: `0 2px 12px ${TEAL}44` }}>
+        ← Back to Patient List
+      </button>
+    </div>
+  );
+}
+
+// ─── APP ROOT ─────────────────────────────────────────────────────────────────
+
 export default function Curas() {
-  const [phase, setPhase] = useState("pre");
-  const [patientDisplay, setPatientDisplay] = useState<PatientDisplay>(MOCK_PATIENT);
-  const [patientId, setPatientId] = useState<string | null>(null);
-  const [appointmentId] = useState<string | null>(import.meta.env.VITE_APPOINTMENT_ID ?? null);
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [phase, setPhase] = useState("list");
+  const [appointmentId, setAppointmentId] = useState<string | null>(null);
   const [soapNoteId, setSoapNoteId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (DEMO_MODE) return;
+  const handleSelectPatient = (p: Patient) => {
+    setSelectedPatient(p);
+    setPhase("pre");
+    setAppointmentId(import.meta.env.VITE_APPOINTMENT_ID ?? null);
+  };
 
-    api.getPatients()
-      .then(patients => {
-        if (patients.length === 0) return;
-        const patient = patients[0];
-        setPatientId(patient.id);
-        setPatientDisplay({
-          name: patient.display_name,
-          dob: patient.date_of_birth,
-          mrn: patient.mrn,
-          apptTime: "—",
-          apptType: "—",
-          physician: "—",
-          lastVisit: "—",
-        });
-      })
-      .catch(err => console.error("getPatients error:", err));
-  }, []);
+  const handleBackToList = () => {
+    setSelectedPatient(null);
+    setPhase("list");
+    setAppointmentId(null);
+    setSoapNoteId(null);
+  };
 
   return (
     <div style={{ minHeight: "100vh", background: "#F8F9FA", fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
-      <div style={{ background: TEAL_DARK, padding: "10px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontWeight: 700, color: "#fff", fontSize: 15 }}>Curas AI</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {DEMO_MODE && (
-            <span style={{ fontSize: 11, padding: "3px 10px", background: AMBER_LIGHT, color: AMBER, borderRadius: 20, fontWeight: 600 }}>
-              DEMO MODE
-            </span>
-          )}
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
-            {new Date().toLocaleDateString("en-CA", {
-              weekday: "long",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-          </div>
-        </div>
-      </div>
+      <AppHeader
+        patient={phase !== "list" ? selectedPatient : null}
+        onBackToList={phase !== "list" && phase !== "done" ? handleBackToList : null}
+      />
 
-      <PhaseHeader phase={phase} onNav={setPhase} />
-      <PatientBar patientDisplay={patientDisplay} />
+      {phase !== "list" && phase !== "done" && <PhaseHeader phase={phase} />}
 
-      {phase === "pre" && (
-        <PreAppointment
-          onNext={() => setPhase("during")}
-          patientId={patientId}
-          appointmentId={appointmentId}
-        />
+      {phase === "list" && <PatientList onSelect={handleSelectPatient} />}
+      {phase === "pre" && selectedPatient && (
+        <PreAppointment patient={selectedPatient} appointmentId={appointmentId} onNext={(briefId) => { void briefId; setPhase("during"); }} />
       )}
-      {phase === "during" && (
-        <DuringAppointment
-          onNext={noteId => {
-            if (noteId) setSoapNoteId(noteId);
-            setPhase("post");
-          }}
-          patientId={patientId}
-          appointmentId={appointmentId}
-        />
+      {phase === "during" && selectedPatient && (
+        <DuringAppointment patient={selectedPatient} appointmentId={appointmentId} onNext={(noteId) => { if (noteId) setSoapNoteId(noteId); setPhase("post"); }} />
       )}
-      {phase === "post" && (
-        <PostAppointment
-          patientId={patientId}
-          appointmentId={appointmentId}
-          soapNoteId={soapNoteId}
-        />
+      {phase === "post" && selectedPatient && (
+        <PostAppointment patient={selectedPatient} appointmentId={appointmentId} soapNoteId={soapNoteId} onDone={() => setPhase("done")} />
+      )}
+      {phase === "done" && selectedPatient && (
+        <CompletionScreen patient={selectedPatient} onBackToList={handleBackToList} />
       )}
     </div>
   );

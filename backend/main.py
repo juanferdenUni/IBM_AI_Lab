@@ -2,9 +2,9 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from api.test import router as test_router
-from config import settings
-from api import (
+from backend.api.test import router as test_router
+from backend.config import settings
+from backend.api import (
     patients,
     context_briefs,
     appointments,
@@ -14,6 +14,8 @@ from api import (
     audit,
     health,
 )
+
+print("SUPABASE KEY:", settings.supabase_anon_key[:10])
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)

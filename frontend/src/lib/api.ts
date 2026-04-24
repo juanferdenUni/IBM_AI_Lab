@@ -43,52 +43,21 @@ async function patch<T>(path: string, body: unknown, token?: string): Promise<T>
   return res.json();
 }
 
+// Add endpoint wrappers per CONTRACTS.md §4
 export const api = {
-  // §4.2 Patients
-  getPatients: (): Promise<Patient[]> =>
-    get("/api/patients"),
-
-  // §4.3 Context Engine
-  generateContextBrief: (patientId: string, appointmentId: string): Promise<ContextBrief> =>
-    post(`/api/patients/${patientId}/context-brief`, { appointment_id: appointmentId }),
-
-  getContextBrief: (patientId: string): Promise<ContextBrief> =>
-    get(`/api/patients/${patientId}/context-brief`),
-
-  approveContextBrief: (briefId: string): Promise<{ id: string; approved: boolean; approved_at: string }> =>
-    post(`/api/context-briefs/${briefId}/approve`, {}),
-
-  // §4.4 Active Scribe
-  startAppointment: (patientId: string, appointmentId: string, audioFilePath: string): Promise<{ appointment_id: string; stream_url: string; status: string }> =>
-    post(`/api/patients/${patientId}/appointment/start`, { appointment_id: appointmentId, audio_file_path: audioFilePath }),
-
-  endAppointment: (patientId: string, appointmentId: string): Promise<SOAPNote> =>
-    post(`/api/patients/${patientId}/appointment/end`, { appointment_id: appointmentId }),
-
-  getSOAPNote: (patientId: string): Promise<SOAPNote> =>
-    get(`/api/patients/${patientId}/soap-note`),
-
-  approveSOAPNote: (noteId: string): Promise<{ id: string; approved: boolean; approved_at: string }> =>
-    post(`/api/soap-notes/${noteId}/approve`, {}),
-
-  // §4.5 Form Originator
-  generateFormDraft: (patientId: string, appointmentId: string, soapNoteId: string): Promise<FormDraft> =>
-    post(`/api/patients/${patientId}/form-draft`, { appointment_id: appointmentId, soap_note_id: soapNoteId }),
-
-  getFormDraft: (patientId: string): Promise<FormDraft> =>
-    get(`/api/patients/${patientId}/form-draft`),
-
-  updateFormDraft: (draftId: string, fields: Record<string, FormFieldValue>): Promise<FormDraft> =>
-    patch(`/api/form-drafts/${draftId}`, { fields }),
-
-  approveFormDraft: (draftId: string): Promise<{ id: string; approved: boolean; approved_at: string; fhir_composition_id: string; fhir_doc_ref_id: string; patient_workflow_state: string }> =>
-    post(`/api/form-drafts/${draftId}/approve-and-sync`, {}),
-
-  // §4.4 SSE stream — token passed as query param (EventSource can't set headers)
-  streamAppointment: (patientId: string, appointmentId: string, token?: string): EventSource => {
-    const params = new URLSearchParams({ appointment_id: appointmentId });
-    if (token) params.set("token", token);
-    const url = `${BASE}/api/patients/${patientId}/appointment/stream?${params.toString()}`;
-    return new EventSource(url);
-  },
+  get,
+  post,
+  patch,
+  getPatients: () => get<any>(`/api/patients`),
+  getPatient: (patientId: string) => get<any>(`/api/patients/${patientId}`),
+  generateContextBrief: (patientId: string, appointmentId: string) =>
+    post<any>(`/api/patients/${patientId}/context-brief`, { appointment_id: appointmentId }),
+  endAppointment: (patientId: string, appointmentId: string) =>
+    post<any>(`/api/patients/${patientId}/appointment/end`, { appointment_id: appointmentId }),
+  generateFormDraft: (patientId: string, appointmentId: string, soapNoteId: string) =>
+    post<any>(`/api/patients/${patientId}/form-draft`, { appointment_id: appointmentId, soap_note_id: soapNoteId }),
+  updateFormDraft: (formId: string, fields: Record<string, unknown>) =>
+    patch<any>(`/api/form-drafts/${formId}`, { fields }),
+  approveFormDraft: (formId: string) =>
+    post<any>(`/api/form-drafts/${formId}/approve-and-sync`, {}),
 };

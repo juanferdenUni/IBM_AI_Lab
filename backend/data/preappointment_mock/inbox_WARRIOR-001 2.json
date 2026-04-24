@@ -1,0 +1,26 @@
+[
+  {
+    "channel": "e-fax",
+    "title": "Cardiology consult results",
+    "date": "2026-04-01",
+    "summary": "Consult note received. Echo reviewed and no intervention was recommended.",
+    "priority": "high",
+    "requires_action": true
+  },
+  {
+    "channel": "lab_inbox",
+    "title": "HbA1c follow-up reminder",
+    "date": "2026-04-18",
+    "summary": "Repeat diabetes monitoring requested because the last HbA1c is above target.",
+    "priority": "high",
+    "requires_action": true
+  },
+  {
+    "channel": "email",
+    "title": "ODSP renewal status question",
+    "date": "2026-04-20",
+    "summary": "Patient message asks whether disability paperwork needs to be renewed before the next visit.",
+    "priority": "routine",
+    "requires_action": false
+  }
+]

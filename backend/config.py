@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     # Feature flags
     auth_enabled: bool = True
+    AUTH_ENABLED: bool = False
     confidence_threshold: float = 0.75
 
     # Deployment
@@ -36,7 +37,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file="backend/.env",
         case_sensitive=False,
         extra="allow",
     )
