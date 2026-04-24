@@ -85,8 +85,10 @@ export const api = {
     post(`/api/form-drafts/${draftId}/approve-and-sync`, {}),
 
   // §4.4 SSE stream — token passed as query param (EventSource can't set headers)
-  streamAppointment: (patientId: string, token?: string): EventSource => {
-    const url = `${BASE}/api/patients/${patientId}/appointment/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  streamAppointment: (patientId: string, appointmentId: string, token?: string): EventSource => {
+    const params = new URLSearchParams({ appointment_id: appointmentId });
+    if (token) params.set("token", token);
+    const url = `${BASE}/api/patients/${patientId}/appointment/stream?${params.toString()}`;
     return new EventSource(url);
   },
 };
