@@ -13,14 +13,16 @@ router = APIRouter()
 
 @router.get("/patients", response_model=list[Patient])
 async def list_patients(user: dict = Depends(auth_dependency)):
-    """List all patients for the authenticated physician."""
     try:
         client = get_client()
 
+        query = client.table("patients").select("*")
+
+        if settings.AUTH_ENABLED:
+            query = query.eq("physician_id", user["id"])
+
         response = (
-            client.table("patients")
-            .select("*")
-            .eq("physician_id", user["id"])
+            query
             .order("workflow_state")
             .order("display_name")
             .execute()
@@ -37,32 +39,21 @@ async def list_patients(user: dict = Depends(auth_dependency)):
 
 @router.get("/patients/{patient_id}", response_model=Patient)
 async def get_patient(patient_id: UUID, user: dict = Depends(auth_dependency)):
-    """Get a specific patient by ID."""
     try:
         client = get_client()
-
         patient_id_str = str(patient_id)
 
-        logger.debug(f"Fetching patient with ID: {patient_id_str}")
+        query = client.table("patients").select("*").eq("id", patient_id_str)
 
-        response = (
-            client.table("patients")
-            .select("*")
-            .eq("id", patient_id_str)
-            .eq("physician_id", user["id"])
-            .execute()
-        )
+        if settings.AUTH_ENABLED:
+            query = query.eq("physician_id", user["id"])
 
-        logger.debug(f"Response data: {response.data}")
+        response = query.execute()
 
-        if not response.data or len(response.data) == 0:
-            logger.warning(f"Patient not found: {patient_id_str}")
+        if not response.data:
             raise HTTPException(status_code=404, detail="Patient not found")
 
-        patient_data = response.data[0]
-        logger.debug(f"Found patient: {patient_data}")
-
-        return Patient(**patient_data)
+        return Patient(**response.data[0])
 
     except HTTPException:
         raise
@@ -77,19 +68,17 @@ async def update_patient_workflow_state(
     update: PatientUpdate,
     user: dict = Depends(auth_dependency),
 ):
-    """Update a patient's workflow state."""
     try:
         client = get_client()
-
         patient_id_str = str(patient_id)
 
-        check = (
-            client.table("patients")
-            .select("*")
-            .eq("id", patient_id_str)
-            .eq("physician_id", user["id"])
-            .execute()
-        )
+        # Build base query
+        check_query = client.table("patients").select("*").eq("id", patient_id_str)
+
+        if settings.AUTH_ENABLED:
+            check_query = check_query.eq("physician_id", user["id"])
+
+        check = check_query.execute()
 
         if not check.data:
             raise HTTPException(status_code=404, detail="Patient not found")
@@ -103,13 +92,12 @@ async def update_patient_workflow_state(
         if not update_data:
             return Patient(**check.data[0])
 
-        response = (
-            client.table("patients")
-            .update(update_data)
-            .eq("id", patient_id_str)
-            .eq("physician_id", user["id"])
-            .execute()
-        )
+        update_query = client.table("patients").update(update_data).eq("id", patient_id_str)
+
+        if settings.AUTH_ENABLED:
+            update_query = update_query.eq("physician_id", user["id"])
+
+        response = update_query.execute()
 
         if not response.data:
             raise HTTPException(status_code=500, detail="Failed to update patient")
