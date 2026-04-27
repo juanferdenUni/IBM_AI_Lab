@@ -62,6 +62,54 @@ interface FormField {
   confidence: number;
 }
 
+const LIVE_FORM_FIELD_DEFS = [
+  { id: "patient_last_name", label: "Patient Last Name" },
+  { id: "patient_first_name", label: "Patient First Name" },
+  { id: "date_of_birth", label: "Date Of Birth" },
+  { id: "sin", label: "SIN" },
+  { id: "address", label: "Address" },
+  { id: "diagnosis_code", label: "Diagnosis Code" },
+  { id: "diagnosis_description", label: "Diagnosis Description" },
+  { id: "marked_restriction_walking", label: "Marked Restriction Walking" },
+  { id: "marked_restriction_mental", label: "Marked Restriction Mental" },
+  { id: "life_sustaining_therapy", label: "Life Sustaining Therapy" },
+  { id: "duration_years", label: "Duration Years" },
+  { id: "certifying_practitioner_name", label: "Certifying Practitioner Name" },
+  { id: "certifying_practitioner_cpso", label: "Certifying Practitioner CPSO" },
+  { id: "certification_date", label: "Certification Date" },
+] as const;
+
+function makeLiveFallbackFields(patient: Patient): FormField[] {
+  const parts = patient.display_name.trim().split(/\s+/).filter(Boolean);
+  const firstName = parts[0] ?? "";
+  const lastName = parts.slice(1).join(" ");
+
+  return LIVE_FORM_FIELD_DEFS.map((field) => {
+    if (field.id === "patient_first_name" && firstName) {
+      return { id: field.id, label: field.label, value: firstName, confidence: 100 };
+    }
+    if (field.id === "patient_last_name" && lastName) {
+      return { id: field.id, label: field.label, value: lastName, confidence: 100 };
+    }
+    if (field.id === "date_of_birth" && patient.date_of_birth) {
+      return { id: field.id, label: field.label, value: patient.date_of_birth, confidence: 100 };
+    }
+    return { id: field.id, label: field.label, value: "", confidence: 0 };
+  });
+}
+
+function normalizeFormDraftFields(formJson: Record<string, { value: unknown; confidence: number }>): FormField[] {
+  return LIVE_FORM_FIELD_DEFS.map(({ id, label }) => {
+    const field = formJson[id];
+    return {
+      id,
+      label,
+      value: field?.value === null || field?.value === undefined ? "" : String(field.value),
+      confidence: field ? Math.round((field.confidence ?? 0) * 100) : 0,
+    };
+  });
+}
+
 // ─── Demo Data (used only when DEMO_MODE=true) ────────────────────────────────
 
 const DEMO_PATIENTS: Patient[] = [
@@ -730,37 +778,55 @@ function PostAppointment({ patient, appointmentId, soapNoteId, onDone }: {
   soapNoteId: string | null;
   onDone: () => void;
 }) {
-  const [fields, setFields] = useState<FormField[]>(DEMO_FORM_FIELDS.map(f => ({ ...f })));
+  const [fields, setFields] = useState<FormField[]>(
+    DEMO_MODE ? DEMO_FORM_FIELDS.map(f => ({ ...f })) : makeLiveFallbackFields(patient)
+  );
   const [formDraftId, setFormDraftId] = useState<string | null>(null);
   const [approved, setApproved] = useState(false);
   const [generating, setGenerating] = useState(true);
   const [genDone, setGenDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (DEMO_MODE || !patient.id || !appointmentId || !soapNoteId) {
       setTimeout(() => { setGenerating(false); setGenDone(true); }, 2000);
       return;
     }
+
+    const requestKey = `${patient.id}:${appointmentId}:${soapNoteId}`;
+    if (requestKeyRef.current === requestKey) return;
+    requestKeyRef.current = requestKey;
+
     setGenerating(true);
     api.generateFormDraft(patient.id, appointmentId, soapNoteId)
       .then(draft => {
         setFormDraftId(draft.id);
-        const converted: FormField[] = Object.entries(draft.form_json).map(([key, field]: [string, any]) => ({
-          id: key,
-          label: key.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
-          value: field.value === null || field.value === undefined ? "" : String(field.value),
-          confidence: Math.round(field.confidence * 100),
-        }));
-        setFields(converted);
+        setFields(normalizeFormDraftFields(draft.form_json));
         setGenDone(true);
       })
-      .catch(err => { console.error(err); setError("Could not generate form — showing demo data"); setGenDone(true); })
+      .catch(async (err) => {
+        console.error(err);
+        try {
+          const existingDraft = await api.getFormDraft(patient.id);
+          setFormDraftId(existingDraft.id);
+          setFields(normalizeFormDraftFields(existingDraft.form_json));
+          setError("Loaded the existing form draft.");
+          setGenDone(true);
+        } catch {
+          setFields(makeLiveFallbackFields(patient));
+          setError("Could not generate the full form. Showing available patient details.");
+          setGenDone(true);
+        }
+      })
       .finally(() => setGenerating(false));
   }, [patient.id, appointmentId, soapNoteId]);
 
   const autoFilled = fields.filter(f => f.confidence > 0).length;
   const avgConf = autoFilled > 0 ? Math.round(fields.filter(f => f.confidence > 0).reduce((a, f) => a + f.confidence, 0) / autoFilled) : 0;
+  const physicianRequiredCount = fields.filter(f => f.confidence === 0).length;
+  const needsReviewCount = fields.filter(f => f.confidence > 0 && f.confidence < 90).length;
+  const highConfidenceCount = fields.filter(f => f.confidence >= 90).length;
 
   const handleChange = (id: string, val: string) => {
     setFields(prev => prev.map(f => f.id === id ? { ...f, value: val } : f));
@@ -834,16 +900,16 @@ function PostAppointment({ patient, appointmentId, soapNoteId, onDone }: {
                 <div style={{ flex: 1, background: RED_LIGHT, borderRadius: 8, padding: "10px 12px", textAlign: "center" }}>
                   <div style={{ fontSize: 11, color: RED, fontWeight: 600 }}>Needs Review</div>
                   <div style={{ fontSize: 22, fontWeight: 700, color: RED }}>
-                    {genDone ? fields.filter(f => f.confidence < 85 && f.confidence > 0).length + fields.filter(f => f.confidence === 0).length : "—"}
+                    {genDone ? needsReviewCount + physicianRequiredCount : "—"}
                   </div>
                 </div>
               </div>
               <div style={{ borderTop: "0.5px solid #e5e7eb", paddingTop: 12, marginBottom: 12 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: GRAY_MID, marginBottom: 8 }}>Field Status</div>
                 {[
-                  { label: "High confidence (≥90%)", count: fields.filter(f => f.confidence >= 90).length, color: GREEN },
-                  { label: "Needs review (75–89%)",  count: fields.filter(f => f.confidence >= 75 && f.confidence < 90).length, color: AMBER },
-                  { label: "Physician required",     count: fields.filter(f => f.confidence < 75).length, color: RED },
+                  { label: "High confidence (≥90%)", count: highConfidenceCount, color: GREEN },
+                  { label: "Needs review (1–89%)",   count: needsReviewCount, color: AMBER },
+                  { label: "Physician required",     count: physicianRequiredCount, color: RED },
                 ].map((item, i) => (
                   <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: GRAY_DARK }}>

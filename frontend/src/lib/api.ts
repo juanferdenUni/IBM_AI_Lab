@@ -1,13 +1,30 @@
 // Spec: CONTRACTS.md §4 REST API Endpoints
-import type {
-  Patient,
-  ContextBrief,
-  SOAPNote,
-  FormDraft,
-  FormFieldValue,
-} from "../types";
+function resolveApiBase(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL;
 
-const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+  if (!configured) {
+    if (typeof window !== "undefined") {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+    return "http://127.0.0.1:8000";
+  }
+
+  try {
+    const url = new URL(configured);
+    if (
+      typeof window !== "undefined" &&
+      (url.hostname === "localhost" || url.hostname === "127.0.0.1") &&
+      window.location.hostname !== url.hostname
+    ) {
+      url.hostname = window.location.hostname;
+    }
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return configured.replace(/\/$/, "");
+  }
+}
+
+const BASE = resolveApiBase();
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = localStorage.getItem("supabase_token");
   return {
@@ -49,6 +66,7 @@ export const api = {
   patch,
   getPatients: () => get<any>(`/api/patients`),
   getPatient: (patientId: string) => get<any>(`/api/patients/${patientId}`),
+  getFormDraft: (patientId: string) => get<any>(`/api/patients/${patientId}/form-draft`),
   createAppointment: (patientId: string) =>
     post<any>(`/api/patients/${patientId}/appointments`, { scheduled_at: new Date().toISOString() }),
   generateContextBrief: (patientId: string, appointmentId: string) =>

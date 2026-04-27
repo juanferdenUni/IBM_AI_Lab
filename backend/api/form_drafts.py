@@ -1,7 +1,7 @@
 import logging
 import json
 from uuid import UUID, uuid4
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends
 
@@ -37,6 +37,215 @@ Rules:
 - For fields the physician must enter (SIN, CPSO number), set value=null and confidence=0.0.
 - Return ONLY the JSON object, no markdown, no explanation.
 """
+
+
+def _split_patient_name(display_name: str) -> tuple[str | None, str | None]:
+    parts = [part.strip() for part in display_name.split() if part.strip()]
+    if not parts:
+        return None, None
+    if len(parts) == 1:
+        return parts[0], None
+    return parts[0], " ".join(parts[1:])
+
+
+def _extract_patient_resource(bundle: dict) -> dict:
+    entries = bundle.get("entry") or []
+    for entry in entries:
+        resource = entry.get("resource") or {}
+        if resource.get("resourceType") == "Patient":
+            return resource
+    return {}
+
+
+def _build_patient_bundle_override(
+    *,
+    patient_row: dict,
+    fhir_patient_bundle: dict,
+) -> dict:
+    bundle = json.loads(json.dumps(fhir_patient_bundle))
+    resource = _extract_patient_resource(bundle)
+    first_name, last_name = _split_patient_name(patient_row.get("display_name", ""))
+
+    if resource:
+        resource["identifier"] = [{"system": "MRN", "value": patient_row.get("mrn", "")}]
+        if first_name or last_name:
+            resource["name"] = [{
+                "family": last_name or "",
+                "given": [first_name] if first_name else [],
+                "text": patient_row.get("display_name", ""),
+            }]
+        if patient_row.get("date_of_birth"):
+            resource["birthDate"] = str(patient_row["date_of_birth"])
+
+    return bundle
+
+
+def _extract_primary_condition(conditions_bundle: dict) -> tuple[str | None, str | None, str | None]:
+    entries = conditions_bundle.get("entry") or []
+    if not entries:
+        return None, None, None
+
+    resource = (entries[0] or {}).get("resource") or {}
+    coding = ((resource.get("code") or {}).get("coding") or [{}])[0] or {}
+    return (
+        coding.get("code"),
+        coding.get("display") or (resource.get("code") or {}).get("text"),
+        resource.get("onsetDateTime"),
+    )
+
+
+def _years_since(start_date: str | None, *, today: date | None = None) -> str | None:
+    if not start_date:
+        return None
+
+    try:
+        start = datetime.fromisoformat(start_date.replace("Z", "+00:00")).date()
+    except ValueError:
+        try:
+            start = date.fromisoformat(start_date[:10])
+        except ValueError:
+            return None
+
+    today = today or datetime.now(timezone.utc).date()
+    years = today.year - start.year - ((today.month, today.day) < (start.month, start.day))
+    return str(max(years, 0))
+
+
+def _default_field_value() -> dict:
+    return {"value": None, "confidence": 0.0, "source": "not_populated"}
+
+
+def _set_field(
+    overrides: dict[str, dict],
+    field_name: str,
+    value,
+    confidence: float,
+    source: str,
+) -> None:
+    if value is None:
+        return
+    if isinstance(value, str) and not value.strip():
+        return
+    overrides[field_name] = {
+        "value": value,
+        "confidence": confidence,
+        "source": source,
+    }
+
+
+def _build_deterministic_fields(
+    *,
+    patient_row: dict,
+    conditions_bundle: dict,
+) -> dict[str, dict]:
+    first_name, last_name = _split_patient_name(patient_row.get("display_name", ""))
+    diagnosis_code, diagnosis_description, onset_date = _extract_primary_condition(conditions_bundle)
+    duration_years = _years_since(onset_date)
+
+    overrides: dict[str, dict] = {}
+
+    _set_field(overrides, "patient_first_name", first_name, 1.0, "patients.display_name")
+    _set_field(overrides, "patient_last_name", last_name, 1.0, "patients.display_name")
+    _set_field(
+        overrides,
+        "date_of_birth",
+        str(patient_row["date_of_birth"]) if patient_row.get("date_of_birth") else None,
+        1.0,
+        "patients.date_of_birth",
+    )
+
+    _set_field(overrides, "sin", patient_row.get("sin"), 1.0, "patients.sin")
+    _set_field(overrides, "address", patient_row.get("address"), 1.0, "patients.address")
+
+    _set_field(
+        overrides,
+        "diagnosis_code",
+        patient_row.get("diagnosis_code") or diagnosis_code,
+        1.0 if patient_row.get("diagnosis_code") else 0.92,
+        "patients.diagnosis_code" if patient_row.get("diagnosis_code") else "FHIR Condition.code",
+    )
+    _set_field(
+        overrides,
+        "diagnosis_description",
+        patient_row.get("diagnosis_description") or diagnosis_description,
+        1.0 if patient_row.get("diagnosis_description") else 0.92,
+        "patients.diagnosis_description" if patient_row.get("diagnosis_description") else "FHIR Condition.code.display",
+    )
+
+    _set_field(
+        overrides,
+        "marked_restriction_walking",
+        patient_row.get("marked_restriction_walking"),
+        1.0,
+        "patients.marked_restriction_walking",
+    )
+    _set_field(
+        overrides,
+        "marked_restriction_mental",
+        patient_row.get("marked_restriction_mental"),
+        1.0,
+        "patients.marked_restriction_mental",
+    )
+    _set_field(
+        overrides,
+        "life_sustaining_therapy",
+        patient_row.get("life_sustaining_therapy"),
+        1.0,
+        "patients.life_sustaining_therapy",
+    )
+
+    patient_duration = patient_row.get("duration_years")
+    _set_field(
+        overrides,
+        "duration_years",
+        str(patient_duration) if patient_duration is not None else duration_years,
+        1.0 if patient_duration is not None else 0.88,
+        "patients.duration_years" if patient_duration is not None else "FHIR Condition.onsetDateTime",
+    )
+
+    _set_field(
+        overrides,
+        "certifying_practitioner_name",
+        patient_row.get("certifying_practitioner_name"),
+        1.0,
+        "patients.certifying_practitioner_name",
+    )
+    _set_field(
+        overrides,
+        "certifying_practitioner_cpso",
+        patient_row.get("certifying_practitioner_cpso"),
+        1.0,
+        "patients.certifying_practitioner_cpso",
+    )
+    _set_field(
+        overrides,
+        "certification_date",
+        str(patient_row["certification_date"]) if patient_row.get("certification_date") else datetime.now(timezone.utc).date().isoformat(),
+        1.0,
+        "patients.certification_date" if patient_row.get("certification_date") else "system.current_date",
+    )
+
+    return overrides
+
+
+def _merge_form_fields(
+    *,
+    schema: dict,
+    llm_fields: dict | None,
+    deterministic_fields: dict[str, dict],
+) -> dict[str, dict]:
+    form_json = {field_name: _default_field_value() for field_name in schema.keys()}
+
+    for field_name, field_data in (llm_fields or {}).items():
+        if field_name in form_json and isinstance(field_data, dict):
+            form_json[field_name] = {
+                "value": field_data.get("value"),
+                "confidence": float(field_data.get("confidence", 0.0)),
+                "source": field_data.get("source", "unknown"),
+            }
+
+    form_json.update(deterministic_fields)
+    return form_json
 
 
 def _load_t2201_schema() -> dict:
@@ -107,9 +316,18 @@ async def generate_form_draft(patient_id: UUID, request: FormDraftCreate, user: 
     except FileNotFoundError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+    deterministic_fields = _build_deterministic_fields(
+        patient_row=patient,
+        conditions_bundle=conditions,
+    )
+
     # 5. Build Granite prompt
+    resolved_patient_bundle = _build_patient_bundle_override(
+        patient_row=patient,
+        fhir_patient_bundle=fhir_patient,
+    )
     fhir_context = {
-        "patient": fhir_patient,
+        "patient": resolved_patient_bundle,
         "conditions": conditions,
         "observations": observations,
         "medications": medications,
@@ -122,6 +340,9 @@ async def generate_form_draft(patient_id: UUID, request: FormDraftCreate, user: 
     )
 
     # 6. Call Granite
+    llm_fallback_used = False
+    form_fields_raw: dict = {}
+
     try:
         raw_response = await generate(prompt=prompt, system=FORM_SYSTEM_PROMPT)
         import re
@@ -132,38 +353,39 @@ async def generate_form_draft(patient_id: UUID, request: FormDraftCreate, user: 
         # Take the largest candidate (most complete form output)
         form_fields_raw = json.loads(max(candidates, key=len))
     except LLMError as e:
-        raise HTTPException(status_code=503, detail=f"Granite call failed: {e}")
+        llm_fallback_used = True
+        logger.warning("Granite call failed during form generation; using deterministic fallback: %s", e)
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=503, detail=f"Granite returned invalid JSON: {e}")
+        llm_fallback_used = True
+        preview = (raw_response[:500] if "raw_response" in locals() else "").replace("\n", " ")
+        logger.warning(
+            "Granite returned invalid JSON during form generation; using deterministic fallback: %s | raw=%r",
+            e,
+            preview,
+        )
 
     # 7. Convert to FormFieldValue objects
-    form_json = {}
-    for field_name, field_data in form_fields_raw.items():
-        if isinstance(field_data, dict):
-            form_json[field_name] = {
-                "value": field_data.get("value"),
-                "confidence": float(field_data.get("confidence", 0.0)),
-                "source": field_data.get("source", "unknown"),
-            }
+    form_json = _merge_form_fields(
+        schema=schema,
+        llm_fields=form_fields_raw,
+        deterministic_fields=deterministic_fields,
+    )
 
     # 8. Check for existing draft to handle versioning
     existing_resp = (
         client.table("form_drafts")
-        .select("id, version")
+        .select("*")
         .eq("appointment_id", str(request.appointment_id))
         .is_("superseded_by", "null")
         .execute()
     )
 
+    if existing_resp.data:
+        return existing_resp.data[0]
+
     new_version = 1
     physician_id = patient.get("physician_id", "00000000-0000-0000-0000-000000000000")
     new_id = str(uuid4())
-
-    if existing_resp.data:
-        old = existing_resp.data[0]
-        new_version = old["version"] + 1
-        # Mark old version as superseded
-        client.table("form_drafts").update({"superseded_by": new_id}).eq("id", old["id"]).execute()
 
     # 9. Persist the new draft
     insert_data = {
@@ -190,7 +412,11 @@ async def generate_form_draft(patient_id: UUID, request: FormDraftCreate, user: 
         resource_type="form_draft",
         resource_id=UUID(new_id),
         appointment_id=request.appointment_id,
-        metadata={"version": new_version, "field_count": len(form_json)},
+        metadata={
+            "version": new_version,
+            "field_count": len(form_json),
+            "llm_fallback_used": llm_fallback_used,
+        },
     )
 
     return insert_resp.data[0]
