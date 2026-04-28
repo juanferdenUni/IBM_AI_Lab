@@ -15,21 +15,6 @@ from api import (
     health,
 )
 
-# Print all Supabase env vars for debugging
-print("=" * 60)
-print("ENVIRONMENT VARIABLE AUDIT:")
-print("=" * 60)
-print(f"SUPABASE_URL from env: {os.getenv('SUPABASE_URL', 'NOT SET')}")
-print(f"SUPABASE_ANON_KEY from env: {os.getenv('SUPABASE_ANON_KEY', 'NOT SET')[:20]}..." if os.getenv('SUPABASE_ANON_KEY') else "NOT SET")
-print(f"SUPABASE_SERVICE_ROLE_KEY from env: {os.getenv('SUPABASE_SERVICE_ROLE_KEY', 'NOT SET')[:20]}..." if os.getenv('SUPABASE_SERVICE_ROLE_KEY') else "NOT SET")
-print("=" * 60)
-print("SETTINGS OBJECT VALUES:")
-print("=" * 60)
-print(f"settings.supabase_url: {settings.supabase_url}")
-print(f"settings.supabase_anon_key: {settings.supabase_anon_key[:20]}..." if settings.supabase_anon_key else "NOT SET")
-print(f"settings.supabase_service_role_key: {settings.supabase_service_role_key[:20]}..." if settings.supabase_service_role_key else "NOT SET")
-print("=" * 60)
-
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
 
