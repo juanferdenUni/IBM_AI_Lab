@@ -28,9 +28,12 @@ async def list_patients(user: dict = Depends(auth_dependency)):
             .execute()
         )
 
-        logger.debug(f"Retrieved {len(response.data)} patients")
-
-        return [Patient(**row) for row in response.data]
+        logger.info(f"DEBUG: Retrieved {len(response.data)} patients from DB")
+        
+        patients = [Patient(**row) for row in response.data]
+        logger.info(f"DEBUG: Successfully converted to {len(patients)} Patient objects")
+        
+        return patients
 
     except Exception as e:
         logger.error(f"Error listing patients: {e}", exc_info=True)
