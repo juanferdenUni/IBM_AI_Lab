@@ -28,6 +28,12 @@ def _get_patient_for_user(client, patient_id: UUID, user_id: str) -> dict:
 
 
 def _get_appointment_for_user(client, appointment_id: str, patient_id: UUID, user_id: str) -> dict:
+    # Validate appointment_id is a valid UUID
+    try:
+        UUID(appointment_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid appointment_id format: {appointment_id}")
+    
     query = (
         client.table("appointments")
         .select("*")

@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import shutil
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -18,6 +19,7 @@ from services.supabase_client import get_client
 from services.audit import log_action
 from models.enums import AuditAction
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ── In-memory session state ────────────────────────────────────────────────
@@ -113,6 +115,12 @@ async def create_appointment(
     """Create a new appointment for a patient (used by frontend when Orchestrate is not running)."""
     db = get_client()
 
+    # Validate patient_id is a valid UUID
+    try:
+        UUID(patient_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid patient_id format: {patient_id}")
+
     patient = db.table("patients").select("id, physician_id").eq("id", patient_id).execute()
     if not patient.data:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -130,7 +138,11 @@ async def create_appointment(
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to create appointment")
 
-    return result.data[0]
+    appointment = result.data[0]
+    logger.info(f"Created appointment: {appointment}")
+    logger.info(f"Appointment id type: {type(appointment.get('id'))}, value: {appointment.get('id')}")
+
+    return appointment
 
 
 @router.post("/patients/{patient_id}/appointment/upload-audio")
