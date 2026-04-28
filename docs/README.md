@@ -1,15 +1,14 @@
-# Ontario Family Physician AI Copilot
+# Curas.ai
 
-**Team:** Warriors — IBM SkillsBuild AI Experiential Learning Lab  
-**Hackathon:** 10-week healthcare AI track
+**Team:** Warriors - IBM SkillsBuild AI Experiential Learning Lab  
 
-An agentic AI copilot for Ontario family physicians that automates administrative documentation across the full appointment lifecycle — from pre-visit patient briefing to post-visit form completion.
+An agentic AI assistant for Ontario, Canada family physicians that automates administrative documentation across the full appointment lifecycle; from pre-visit patient briefing to post-visit form completion.
 
 ---
 
 ## The Problem
 
-Dr. Sarah Smith is a family physician in Mississauga. She sees patients for 10 hours a day and then spends 9+ more hours on paperwork — summarizing patient history before visits, transcribing notes after them, and filling out multi-page government forms like the T2201 Disability Tax Credit Certificate. None of that time is billable under OHIP.
+Dr. Sarah Smith is a family physician in Mississauga. She sees patients for 10 hours a day and then spends 9+ more hours on paperwork; summarizing patient history before visits, transcribing notes after them, and filling out multi-page government forms like the T2201 Disability Tax Credit Certificate. None of that time is billable under OHIP.
 
 Existing tools (EMR dictation, first-gen AI scribes) automate individual tasks but leave the physician responsible for stitching everything together. This product handles the orchestration.
 
@@ -45,6 +44,19 @@ Sarah reviews, edits, and approves all three outputs before anything is written 
 | Mock EMR | HAPI FHIR public server (R4) |
 | Orchestration | IBM Orchestrate |
 | Backend hosting | Render free tier |
+
+---
+
+## Live Demo
+
+Experience Curas.ai in action: https://curasai.netlify.app/   
+
+> Note: The backend is hosted on Render (free tier) and may take up to a minute to spin up if idle.
+
+### Demo Configuration
+For a frictionless demo experience:
+- Authentication disabled
+- Uses fallback FHIR data (no external dependencies)
 
 ---
 
