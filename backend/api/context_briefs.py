@@ -21,10 +21,10 @@ def _get_patient_for_user(client, patient_id: UUID, user_id: str) -> dict:
     query = client.table("patients").select("*").eq("id", str(patient_id))
     if settings.auth_enabled:
         query = query.eq("physician_id", user_id)
-    response = query.maybe_single().execute()
-    if not response or not response.data:
+    response = query.execute()
+    if not response.data:
         raise HTTPException(status_code=404, detail="Patient not found")
-    return response.data
+    return response.data[0]
 
 
 def _get_appointment_for_user(client, appointment_id: str, patient_id: UUID, user_id: str) -> dict:
@@ -36,10 +36,10 @@ def _get_appointment_for_user(client, appointment_id: str, patient_id: UUID, use
     )
     if settings.auth_enabled:
         query = query.eq("physician_id", user_id)
-    response = query.maybe_single().execute()
-    if not response or not response.data:
+    response = query.execute()
+    if not response.data:
         raise HTTPException(status_code=404, detail="Appointment not found")
-    return response.data
+    return response.data[0]
 
 
 async def create_context_brief_record(
@@ -182,13 +182,12 @@ async def approve_context_brief(brief_id: UUID, user: dict = Depends(auth_depend
         client.table("context_briefs")
         .select("*")
         .eq("id", str(brief_id))
-        .maybe_single()
         .execute()
     )
-    if not response or not response.data:
+    if not response.data:
         raise HTTPException(status_code=404, detail="Context brief not found")
 
-    brief = response.data
+    brief = response.data[0]
     _get_patient_for_user(client, UUID(brief["patient_id"]), user["id"])
 
     if brief["approved"]:
